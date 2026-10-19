@@ -20,6 +20,17 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Owner authentication setup
+
+There is no public signup. Create the owner credentials locally:
+
+1. Run `node scripts/hash-owner-password.mjs` in an interactive terminal and copy its `OWNER_PASSWORD_HASH=...` output.
+2. Run `node scripts/generate-session-secret.mjs` and copy its `SESSION_SECRET=...` output.
+3. Put both values in the ignored `.env.local` file and set `APP_ORIGIN=http://localhost:3000` for local development (use the exact HTTPS origin in production).
+4. Run `bun run dev` and open `http://localhost:3000`; the root page requires a valid owner session.
+
+Keep `.env.local` private. The password hash and session secret are never returned to the browser. Login sessions expire after 8 hours and are revoked on logout; restarting the web process invalidates active sessions. Login attempts are rate-limited in the web process.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
