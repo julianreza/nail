@@ -1,0 +1,147 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { createAuthHandlers, hashOwnerPassword } from "../../../lib/server/auth/auth-service";
+import { openDatabase, createRepositories } from "../../../lib/server/db/database";
+import { createDashboardReadHandlers } from "../../../lib/server/dashboard/read-api";
+
+const temporaryDirectories: string[] = [];
+
+function createDatabasePath(): string {
+  const directory = mkdtempSync(join(tmpdir(), "nail-dashboard-test-"));
+  temporaryDirectories.push(directory);
+  return join(directory, "orchestrator.sqlite");
+}
+
+afterEach(() => {
+  while (temporaryDirectories.length > 0) {
+    rmSync(temporaryDirectories.pop()!, { recursive: true, force: true });
+  }
+});
+
+async function createAuthenticatedHandlers(databasePath?: string) {
+  const auth = createAuthHandlers({
+    ownerPasswordHash: await hashOwnerPassword("correct horse battery", {
+      salt: Buffer.alloc(16, 3),
+    }),
+    sessionSecret: Buffer.alloc(32, 4).toString("base64url"),
+    appOrigin: "https://nail.example",
+    secureCookies: true,
+  });
+  const login = await auth.login(
+    new Request("https://nail.example/api/auth/login", {
+      method: "POST",
+      headers: {
+        origin: "https://nail.example",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ password: "correct horse battery" }),
+    }),
+  );
+  const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
+  return {
+    handlers: createDashboardReadHandlers(auth, databasePath),
+    request: (path: string) =>
+      new Request(`https://nail.example${path}`, { headers: { cookie } }),
+  };
+}
+
+describe("authenticated dashboard read APIs", () => {
+  it("rejects unauthenticated requests before touching the database", async () => {
+    const path = createDatabasePath();
+    const handlers = createDashboardReadHandlers(
+      {
+        protectedResource: async () =>
+          Response.json({ error: "Unauthorized" }, { status: 401 }),
+      },
+      path,
+    );
+    const response = await handlers.overview(
+      new Request("https://nail.example/api/overview"),
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  it("reports missing database configuration instead of fabricating counts", async () => {
+    const { handlers, request } = await createAuthenticatedHandlers();
+    const response = await handlers.overview(request("/api/overview"));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "Database is not configured" });
+  });
+
+  it("returns real zero counts and empty lists for a fresh database", async () => {
+    const { handlers, request } = await createAuthenticatedHandlers(createDatabasePath());
+    const overview = await handlers.overview(request("/api/overview"));
+    const projects = await handlers.projects(request("/api/projects"));
+
+    expect(overview.status).toBe(200);
+    expect(await overview.json()).toEqual({
+      projectsCount: 0,
+      agentsCount: 0,
+      activeRunsCount: 0,
+      queuedRunsCount: 0,
+      pendingApprovalsCount: 0,
+    });
+    expect(await projects.json()).toEqual([]);
+  });
+
+  it("returns counts and records from SQLite without exposing provider secret references", async () => {
+    const path = createDatabasePath();
+    const database = openDatabase(path);
+    const repositories = createRepositories(database);
+    repositories.projects.create({ id: "project-1", name: "Nail" });
+    repositories.providers.create({
+      id: "provider-1",
+      name: "DeepSeek",
+      status: "ready",
+      authMode: "api_key",
+      secretReference: "vault://private/provider-key",
+      capabilities: ["tools"],
+    });
+    repositories.agents.create({
+      id: "agent-1",
+      projectId: "project-1",
+      providerId: "provider-1",
+      name: "FE",
+      role: "frontend",
+    });
+    repositories.runs.create({
+      id: "run-1",
+      projectId: "project-1",
+      state: "running",
+    });
+    repositories.tasks.create({
+      id: "task-1",
+      runId: "run-1",
+      title: "Build shell",
+      state: "running",
+    });
+    repositories.approvals.create({
+      id: "approval-1",
+      runId: "run-1",
+      payloadFingerprint: "fingerprint",
+      decision: "pending",
+    });
+    database.close();
+
+    const { handlers, request } = await createAuthenticatedHandlers(path);
+    const overview = await handlers.overview(request("/api/overview"));
+    const providers = await handlers.providers(request("/api/providers"));
+    const records = (await providers.json()) as Array<Record<string, unknown>>;
+
+    expect(await overview.json()).toEqual({
+      projectsCount: 1,
+      agentsCount: 1,
+      activeRunsCount: 1,
+      queuedRunsCount: 0,
+      pendingApprovalsCount: 1,
+    });
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ id: "provider-1", status: "ready" });
+    expect(records[0]).not.toHaveProperty("secretReference");
+    expect(JSON.stringify(records)).not.toContain("vault://private/provider-key");
+  });
+});

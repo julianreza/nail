@@ -1,0 +1,380 @@
+import { createHash, randomUUID } from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
+import { canTransitionRunState, type RunState } from "../../domain/run-state";
+import { createRepositories } from "../db/repositories";
+import { withTransaction } from "../db/database";
+
+export interface ApprovalScope {
+  planVersion: number;
+  baselineCommit: string | null;
+  setupCommands: string[];
+  verificationCommands: string[];
+  permissions: string[];
+  costLimitMicrounits: number;
+}
+
+export type RunTransitionActor = "owner" | "worker" | "system";
+
+const SCOPE_FIELDS = [
+  "baselineCommit",
+  "costLimitMicrounits",
+  "permissions",
+  "planVersion",
+  "setupCommands",
+  "verificationCommands",
+] as const;
+
+function isStringList(value: unknown, maxItems = 100): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= maxItems &&
+    value.every((item) => typeof item === "string" && item.length <= 4096)
+  );
+}
+
+function normalizeScope(
+  value: ApprovalScope,
+  allowedPermissions: ReadonlySet<string>,
+): ApprovalScope {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Approval scope is invalid");
+  }
+  const keys = Object.keys(value).sort();
+  if (keys.length !== SCOPE_FIELDS.length || keys.some((key, index) => key !== SCOPE_FIELDS[index])) {
+    throw new Error("Approval scope contains unsupported fields");
+  }
+  if (!Number.isSafeInteger(value.planVersion) || value.planVersion < 1) {
+    throw new Error("Approval plan version is invalid");
+  }
+  if (
+    value.baselineCommit !== null &&
+    (typeof value.baselineCommit !== "string" || value.baselineCommit.length === 0)
+  ) {
+    throw new Error("Approval baseline is invalid");
+  }
+  if (!isStringList(value.setupCommands) || !isStringList(value.verificationCommands)) {
+    throw new Error("Approval commands are invalid");
+  }
+  if (
+    value.setupCommands.some((command) => command.trim().length === 0) ||
+    value.verificationCommands.some((command) => command.trim().length === 0)
+  ) {
+    throw new Error("Approval commands cannot be empty");
+  }
+  if (
+    !isStringList(value.permissions, 64) ||
+    value.permissions.some((permission) => permission.length === 0) ||
+    new Set(value.permissions).size !== value.permissions.length
+  ) {
+    throw new Error("Approval permissions are invalid");
+  }
+  if (value.permissions.some((permission) => !allowedPermissions.has(permission))) {
+    throw new Error("Approval requests a permission not allowed by server policy");
+  }
+  if (
+    !Number.isSafeInteger(value.costLimitMicrounits) ||
+    value.costLimitMicrounits <= 0
+  ) {
+    throw new Error("Approval cost limit must be a finite positive integer");
+  }
+
+  return {
+    planVersion: value.planVersion,
+    baselineCommit: value.baselineCommit,
+    setupCommands: [...value.setupCommands],
+    verificationCommands: [...value.verificationCommands],
+    permissions: [...value.permissions],
+    costLimitMicrounits: value.costLimitMicrounits,
+  };
+}
+
+function serializeScope(scope: ApprovalScope): string {
+  return JSON.stringify({
+    planVersion: scope.planVersion,
+    baselineCommit: scope.baselineCommit,
+    setupCommands: scope.setupCommands,
+    verificationCommands: scope.verificationCommands,
+    permissions: scope.permissions,
+    costLimitMicrounits: scope.costLimitMicrounits,
+  });
+}
+
+function fingerprintScope(scopeJson: string): string {
+  return createHash("sha256").update(scopeJson).digest("hex");
+}
+
+export function isApprovalFingerprintValid(
+  scopeJson: string,
+  expectedFingerprint: string,
+): boolean {
+  try {
+    const parsed = JSON.parse(scopeJson) as unknown;
+    return (
+      JSON.stringify(parsed) === scopeJson &&
+      fingerprintScope(scopeJson) === expectedFingerprint
+    );
+  } catch {
+    return false;
+  }
+}
+
+function scopeFromStoredJson(
+  scopeJson: string,
+  allowedPermissions: ReadonlySet<string>,
+): ApprovalScope {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(scopeJson);
+  } catch {
+    throw new Error("Stored approval scope is invalid");
+  }
+  return normalizeScope(parsed as ApprovalScope, allowedPermissions);
+}
+
+export function createApprovalService(
+  database: DatabaseSync,
+  options: { allowedPermissions: readonly string[] },
+) {
+  const repositories = createRepositories(database);
+  const allowedPermissions = new Set(options.allowedPermissions);
+
+  function readCurrentRun(runId: string) {
+    const run = repositories.runs.getById(runId);
+    if (!run) throw new Error("Run does not exist");
+    return run;
+  }
+
+  function assertScopeMatchesRun(scope: ApprovalScope, run: ReturnType<typeof readCurrentRun>) {
+    if (scope.planVersion !== run.planVersion) {
+      throw new Error("Plan version changed; request a new approval");
+    }
+    if (scope.baselineCommit !== run.baselineCommit) {
+      throw new Error("Repository baseline changed; request a new approval");
+    }
+  }
+
+  function submitForApproval(runId: string, input: ApprovalScope) {
+    const scope = normalizeScope(input, allowedPermissions);
+    const scopeJson = serializeScope(scope);
+    const fingerprint = fingerprintScope(scopeJson);
+    const approvalId = withTransaction(database, () => {
+      const run = readCurrentRun(runId);
+      assertScopeMatchesRun(scope, run);
+      if (run.state !== "draft" && run.state !== "awaiting_approval") {
+        throw new Error("Run is not available for approval");
+      }
+      if (
+        !canTransitionRunState(run.state, "awaiting_approval") &&
+        run.state !== "awaiting_approval"
+      ) {
+        throw new Error("Run cannot request approval from its current state");
+      }
+
+      const existing = repositories.approvals.listForRun(runId);
+      const samePending = existing.find(
+        (approval) =>
+          approval.decision === "pending" &&
+          approval.planVersion === scope.planVersion &&
+          approval.payloadFingerprint === fingerprint,
+      );
+      if (samePending) return samePending.id;
+
+      const sameVersionWithChangedScope = existing.some(
+        (approval) =>
+          approval.planVersion === scope.planVersion &&
+          approval.payloadFingerprint !== fingerprint &&
+          approval.decision !== "rejected",
+      );
+      if (sameVersionWithChangedScope) {
+        throw new Error("Plan payload changed without a new plan version");
+      }
+
+      const id = randomUUID();
+      repositories.approvals.create({
+        id,
+        runId,
+        payloadFingerprint: fingerprint,
+        decision: "pending",
+        planVersion: scope.planVersion,
+        baselineCommit: scope.baselineCommit,
+        scopeJson,
+      });
+
+      if (run.state === "draft") {
+        const result = database
+          .prepare(
+            `UPDATE runs SET state = 'awaiting_approval', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE id = ? AND state = 'draft' AND plan_version = ? AND baseline_commit IS ?`,
+          )
+          .run(runId, scope.planVersion, scope.baselineCommit);
+        if (result.changes !== 1) throw new Error("Run changed while requesting approval");
+      }
+
+      repositories.events.append({
+        runId,
+        eventType: "approval.requested",
+        payload: {
+          approvalId: id,
+          payloadFingerprint: fingerprint,
+          planVersion: scope.planVersion,
+          baselineCommit: scope.baselineCommit,
+        },
+      });
+      return id;
+    });
+
+    return repositories.approvals.getById(approvalId)!;
+  }
+
+  function decide(
+    approvalId: string,
+    input: {
+      decision: "approved" | "rejected";
+      expectedFingerprint: string;
+    },
+  ) {
+    return withTransaction(database, () => {
+      const approval = repositories.approvals.getById(approvalId);
+      if (!approval || approval.decision !== "pending") {
+        throw new Error("Approval is not pending");
+      }
+      if (approval.payloadFingerprint !== input.expectedFingerprint) {
+        throw new Error("Approval changed; review the current payload");
+      }
+
+      const scope = scopeFromStoredJson(approval.scopeJson, allowedPermissions);
+      const scopeJson = serializeScope(scope);
+      if (fingerprintScope(scopeJson) !== approval.payloadFingerprint) {
+        throw new Error("Stored approval fingerprint is invalid");
+      }
+
+      const run = readCurrentRun(approval.runId);
+      assertScopeMatchesRun(scope, run);
+      if (run.state !== "awaiting_approval") {
+        throw new Error("Run is no longer awaiting approval");
+      }
+
+      const nextState: RunState = input.decision === "approved" ? "queued" : "draft";
+      if (!canTransitionRunState(run.state, nextState)) {
+        throw new Error("Run cannot make this approval transition");
+      }
+      if (!repositories.approvals.updateDecision(approvalId, input.decision)) {
+        throw new Error("Approval was already decided");
+      }
+      const transition = database
+        .prepare(
+          `UPDATE runs SET state = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+           WHERE id = ? AND state = 'awaiting_approval' AND plan_version = ? AND baseline_commit IS ?`,
+        )
+        .run(nextState, run.id, scope.planVersion, scope.baselineCommit);
+      if (transition.changes !== 1) throw new Error("Run changed while deciding approval");
+
+      repositories.events.append({
+        runId: run.id,
+        eventType: "approval.decided",
+        payload: {
+          approvalId,
+          decision: input.decision,
+          payloadFingerprint: approval.payloadFingerprint,
+          planVersion: approval.planVersion,
+          nextState,
+        },
+      });
+      return repositories.approvals.getById(approvalId)!;
+    });
+  }
+
+  function isExecutionApproved(runId: string, input: ApprovalScope): boolean {
+    try {
+      const scope = normalizeScope(input, allowedPermissions);
+      const run = readCurrentRun(runId);
+      if (
+        !["queued", "running", "awaiting_review"].includes(run.state) ||
+        scope.planVersion !== run.planVersion ||
+        scope.baselineCommit !== run.baselineCommit
+      ) {
+        return false;
+      }
+      const expectedScope = serializeScope(scope);
+      const expectedFingerprint = fingerprintScope(expectedScope);
+      return repositories.approvals.listForRun(runId).some((approval) => {
+        if (
+          approval.decision !== "approved" ||
+          approval.planVersion !== run.planVersion ||
+          approval.baselineCommit !== run.baselineCommit ||
+          approval.payloadFingerprint !== expectedFingerprint
+        ) {
+          return false;
+        }
+        const stored = scopeFromStoredJson(approval.scopeJson, allowedPermissions);
+        return serializeScope(stored) === expectedScope;
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  function transitionRun(
+    runId: string,
+    nextState: RunState,
+    actor: RunTransitionActor,
+  ) {
+    if (!["owner", "worker", "system"].includes(actor)) {
+      throw new Error("Model output cannot change run state");
+    }
+    return withTransaction(database, () => {
+      const run = readCurrentRun(runId);
+      if (!canTransitionRunState(run.state, nextState)) {
+        throw new Error("Run state transition is not allowed");
+      }
+      if (run.state === "awaiting_approval" && nextState === "queued") {
+        throw new Error("An approved payload is required before queueing");
+      }
+      if (nextState === "done") {
+        throw new Error("Completion requires verified acceptance criteria");
+      }
+      if (nextState === "running" && !isExecutionApprovedForStoredScope(runId)) {
+        throw new Error("An approved payload is required before execution");
+      }
+
+      const result = database
+        .prepare(
+          "UPDATE runs SET state = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND state = ?",
+        )
+        .run(nextState, runId, run.state);
+      if (result.changes !== 1) throw new Error("Run changed during state transition");
+      repositories.events.append({
+        runId,
+        eventType: "run.state_changed",
+        payload: { from: run.state, to: nextState, actor },
+      });
+      return repositories.runs.getById(runId)!;
+    });
+  }
+
+  function isExecutionApprovedForStoredScope(runId: string): boolean {
+    const run = repositories.runs.getById(runId);
+    if (!run) return false;
+    return repositories.approvals.listForRun(runId).some((approval) => {
+      if (
+        approval.decision !== "approved" ||
+        approval.planVersion !== run.planVersion ||
+        approval.baselineCommit !== run.baselineCommit
+      ) {
+        return false;
+      }
+      try {
+        const scope = scopeFromStoredJson(approval.scopeJson, allowedPermissions);
+        return (
+          scope.planVersion === run.planVersion &&
+          scope.baselineCommit === run.baselineCommit &&
+          fingerprintScope(serializeScope(scope)) === approval.payloadFingerprint
+        );
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  return { submitForApproval, decide, isExecutionApproved, transitionRun };
+}

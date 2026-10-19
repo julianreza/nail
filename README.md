@@ -31,6 +31,10 @@ There is no public signup. Create the owner credentials locally:
 
 Keep `.env.local` private. The password hash and session secret are never returned to the browser. Login sessions expire after 8 hours and are revoked on logout; restarting the web process invalidates active sessions. Login attempts are rate-limited in the web process.
 
+## SQLite persistence
+
+Server data uses the built-in `node:sqlite` driver, verified with Bun 1.4.3 and the installed Node runtime. Set `NAIL_DATABASE_PATH` to an absolute SQLite file path on persistent storage (for example, `/var/lib/nail/orchestrator.sqlite`). `openDatabase(path)` creates the file's parent directory, enables WAL and foreign keys, applies versioned migrations, and restricts the database file to owner read/write (`0600`). Do not use `:memory:` for application data. API keys and provider auth tokens are not stored in this database.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

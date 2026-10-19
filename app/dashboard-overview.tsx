@@ -1,0 +1,147 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+export interface OverviewPayload {
+  projectsCount: number;
+  agentsCount: number;
+  activeRunsCount: number;
+  queuedRunsCount: number;
+  pendingApprovalsCount: number;
+}
+
+function isOverviewPayload(value: unknown): value is OverviewPayload {
+  if (typeof value !== "object" || value === null) return false;
+  return [
+    "projectsCount",
+    "agentsCount",
+    "activeRunsCount",
+    "queuedRunsCount",
+    "pendingApprovalsCount",
+  ].every((key) => {
+    const count = (value as Record<string, unknown>)[key];
+    return typeof count === "number" && Number.isSafeInteger(count) && count >= 0;
+  });
+}
+
+const cards = [
+  { key: "activeRunsCount", label: "Sedang berjalan", tone: "lime" },
+  { key: "queuedRunsCount", label: "Dalam antrean", tone: "lavender" },
+  { key: "pendingApprovalsCount", label: "Menunggu persetujuan", tone: "peach" },
+  { key: "projectsCount", label: "Projects", tone: "white" },
+] as const;
+
+export function DashboardSummary({ overview }: { overview: OverviewPayload }) {
+  return (
+    <>
+      <div className="dashboard-card-grid">
+        {cards.map((card) => (
+          <article className={`dashboard-stat-card tone-${card.tone}`} key={card.key}>
+            <span className="stat-card-label">{card.label}</span>
+            <strong className="stat-card-value">
+              {new Intl.NumberFormat("id-ID").format(overview[card.key])}
+            </strong>
+          </article>
+        ))}
+      </div>
+      <section className="dashboard-empty-panel">
+        <div aria-hidden="true" className="empty-illustration">N</div>
+        <div>
+          <p className="eyebrow">LANGKAH BERIKUTNYA</p>
+          <h3>{overview.projectsCount === 0 ? "Mulai dari sebuah project" : "Workspace siap dipakai"}</h3>
+          <p>
+            {overview.projectsCount === 0
+              ? "Belum ada project tersimpan. Setelah project dibuat, status run, antrean, dan persetujuan akan muncul di sini."
+              : "Ringkasan ini hanya menampilkan jumlah yang tersimpan di database; belum ada aktivitas contoh."}
+          </p>
+        </div>
+      </section>
+    </>
+  );
+}
+
+export default function DashboardOverview() {
+  const [overview, setOverview] = useState<OverviewPayload | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+
+    fetch("/api/overview", { cache: "no-store" })
+      .then(async (response) => {
+        const body: unknown = await response.json().catch(() => null);
+        if (!response.ok) {
+          const message =
+            typeof body === "object" && body !== null && "error" in body &&
+            typeof body.error === "string"
+              ? body.error
+              : "Data tidak dapat dimuat.";
+          throw new Error(message);
+        }
+        if (!isOverviewPayload(body)) throw new Error("Format ringkasan tidak valid.");
+        if (active) setOverview(body);
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setError(reason instanceof Error ? reason.message : "Data tidak dapat dimuat.");
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [retry]);
+
+  return (
+    <section aria-label="Ringkasan workspace" className="dashboard-content">
+      <div className="dashboard-section-heading">
+        <div>
+          <p className="eyebrow">OVERVIEW</p>
+          <h2>Ringkasan workspace</h2>
+        </div>
+        <span className="live-indicator"><span aria-hidden="true" /> Data langsung</span>
+      </div>
+
+      {loading ? (
+        <div aria-label="Memuat ringkasan" aria-live="polite" className="dashboard-card-grid">
+          {cards.map((card) => (
+            <div className="dashboard-stat-card is-loading" key={card.key}>
+              <span className="stat-card-label">{card.label}</span>
+              <span className="loading-bar" />
+            </div>
+          ))}
+        </div>
+      ) : error ? (
+        <div aria-live="polite" className="state-card state-card-error" role="alert">
+          <div>
+            <h3>Ringkasan belum tersedia</h3>
+            <p>{error}</p>
+            {error === "Database is not configured" ? (
+              <p className="setup-hint">
+                Set <code>NAIL_DATABASE_PATH</code> ke lokasi SQLite persisten untuk memuat data.
+              </p>
+            ) : null}
+          </div>
+          <button
+            className="button-secondary"
+            onClick={() => {
+              setLoading(true);
+              setError(null);
+              setRetry((value) => value + 1);
+            }}
+            type="button"
+          >
+            Coba lagi
+          </button>
+        </div>
+      ) : overview ? (
+        <DashboardSummary overview={overview} />
+      ) : null}
+    </section>
+  );
+}
