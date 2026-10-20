@@ -33,7 +33,7 @@ Keep `.env.local` private. The password hash and session secret are never return
 
 ## API provider secret storage
 
-The server-side provider adapter reads encrypted API keys through `EncryptedSecretStore`; keys are not stored in SQLite or returned to the browser/sandbox. Before configuring a provider, set `NAIL_SECRET_DIR` to a private persistent directory and create a separate 32-byte key with `node scripts/generate-encryption-key.mjs`; keep that key in server-only environment configuration, never in a container. Provider setup UI and live DeepSeek credentials have not been added or tested yet.
+The server-side provider adapter reads encrypted API keys through `EncryptedSecretStore`; keys are not stored in SQLite or returned to the browser/sandbox. Before configuring a provider, set `NAIL_SECRET_DIR` to a private persistent directory and create a separate 32-byte key with `node scripts/generate-encryption-key.mjs`; keep that key in server-only environment configuration, never in a container. The Providers page can configure one DeepSeek API-key provider. Nail checks the key against DeepSeek's `/models` endpoint before saving; the selected model must be returned by that request. Keys are encrypted and stored separately from SQLite, and neither the key nor its secret reference is returned to the browser. Local automated tests use a stubbed provider response; live credentials have not been tested.
 
 ## SQLite persistence
 

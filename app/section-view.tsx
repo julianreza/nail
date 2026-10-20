@@ -104,6 +104,14 @@ export default function SectionView({ kind }: { kind: SectionKind }) {
 
   useEffect(() => {
     let active = true;
+    const refreshProviders = () => {
+      setLoading(true);
+      setError(null);
+      setRetry((value) => value + 1);
+    };
+    if (kind === "providers") {
+      window.addEventListener("provider-list-refresh", refreshProviders);
+    }
 
     fetch(`/api/${kind}`, { cache: "no-store" })
       .then(async (response) => {
@@ -130,6 +138,9 @@ export default function SectionView({ kind }: { kind: SectionKind }) {
 
     return () => {
       active = false;
+      if (kind === "providers") {
+        window.removeEventListener("provider-list-refresh", refreshProviders);
+      }
     };
   }, [kind, retry]);
 

@@ -666,7 +666,54 @@ a {
   }
 }
 
+.provider-setup-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(280px, 1fr);
+  gap: 24px;
+  padding: 22px;
+  border: 2px solid var(--line);
+  border-radius: 20px;
+  background: var(--lavender);
+  box-shadow: 4px 4px 0 var(--line);
+}
+
+.provider-setup-card h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.provider-setup-form {
+  display: grid;
+  gap: 9px;
+}
+
+.provider-setup-form label {
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.provider-setup-form input {
+  width: 100%;
+  min-height: 42px;
+  margin-bottom: 5px;
+  padding: 9px 11px;
+  border: 1px solid rgb(23 58 50 / 45%);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 13px;
+}
+
+.provider-setup-form .button-primary {
+  justify-self: start;
+}
+
 @media (max-width: 760px) {
+  .provider-setup-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .workspace-layout {
     grid-template-columns: minmax(0, 1fr);
   }
