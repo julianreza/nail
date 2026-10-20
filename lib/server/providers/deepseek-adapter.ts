@@ -324,7 +324,7 @@ export class DeepSeekAdapter {
     const provider = repositories.providers.getById(request.providerId);
     if (
       !provider ||
-      provider.name.toLowerCase() !== "deepseek" ||
+      provider.kind !== "deepseek" ||
       provider.authMode !== "api_key" ||
       !provider.secretReference ||
       !provider.model

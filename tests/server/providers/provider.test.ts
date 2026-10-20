@@ -84,6 +84,7 @@ describe("provider key handling and bounded API calls", () => {
     createRepositories(database).providers.create({
       id: "provider-1",
       name: "DeepSeek",
+      kind: "deepseek",
       status: "ready",
       model: "deepseek-chat",
       authMode: "api_key",
@@ -158,6 +159,7 @@ describe("provider key handling and bounded API calls", () => {
     createRepositories(database).providers.create({
       id: "provider-1",
       name: "DeepSeek",
+      kind: "deepseek",
       status: "ready",
       model: "deepseek-chat",
       authMode: "api_key",
@@ -213,6 +215,7 @@ describe("provider key handling and bounded API calls", () => {
     createRepositories(database).providers.create({
       id: "provider-1",
       name: "DeepSeek",
+      kind: "deepseek",
       status: "ready",
       model: "deepseek-chat",
       authMode: "api_key",
@@ -274,6 +277,7 @@ describe("provider key handling and bounded API calls", () => {
     createRepositories(database).providers.create({
       id: "provider-1",
       name: "DeepSeek",
+      kind: "deepseek",
       status: "ready",
       model: "deepseek-chat",
       authMode: "api_key",
@@ -310,6 +314,7 @@ describe("provider key handling and bounded API calls", () => {
       createRepositories(database).providers.create({
         id: "provider-2",
         name: "DeepSeek",
+        kind: "deepseek",
         status: "ready",
         model: "deepseek-chat",
         authMode: "api_key",
@@ -345,6 +350,7 @@ describe("provider key handling and bounded API calls", () => {
       createRepositories(database).providers.create({
         id: "provider-1",
         name: "DeepSeek",
+        kind: "deepseek",
         status: "ready",
         model: "deepseek-chat",
         authMode: "api_key",
