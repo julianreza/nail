@@ -31,9 +31,21 @@ There is no public signup. Create the owner credentials locally:
 
 Keep `.env.local` private. The password hash and session secret are never returned to the browser. Login sessions expire after 8 hours and are revoked on logout; restarting the web process invalidates active sessions. Login attempts are rate-limited in the web process.
 
+## API provider secret storage
+
+The server-side provider adapter reads encrypted API keys through `EncryptedSecretStore`; keys are not stored in SQLite or returned to the browser/sandbox. Before configuring a provider, set `NAIL_SECRET_DIR` to a private persistent directory and create a separate 32-byte key with `node scripts/generate-encryption-key.mjs`; keep that key in server-only environment configuration, never in a container. Provider setup UI and live DeepSeek credentials have not been added or tested yet.
+
 ## SQLite persistence
 
 Server data uses the built-in `node:sqlite` driver, verified with Bun 1.4.3 and the installed Node runtime. Set `NAIL_DATABASE_PATH` to an absolute SQLite file path on persistent storage (for example, `/var/lib/nail/orchestrator.sqlite`). `openDatabase(path)` creates the file's parent directory, enables WAL and foreign keys, applies versioned migrations, and restricts the database file to owner read/write (`0600`). Do not use `:memory:` for application data. API keys and provider auth tokens are not stored in this database.
+
+## Sandbox status
+
+The sandbox adapter accepts only an already-approved command list and uses a local rootless Docker daemon with cgroup v2 CPU, memory, and PID controls, network `none`, a non-root UID, a read-only baseline, and no secret/control-plane mounts. Defaults are 1 CPU, 768 MiB RAM, 128 PIDs, and a 15-minute command timeout. Any missing or ineffective control disables sandbox start. The adapter is not wired into the worker yet, and the target VPS has not been validated; do not treat agent execution as production-ready.
+
+## Orchestration implementation status
+
+Project detail pages read stored plans, task dependencies, QA rounds, and pending approvals. Approval mutations require an owner session, an exact same-origin request, and the reviewed payload fingerprint. Domain services validate plans and serialize task starts; QA tests exercise repair routing and completion gates using fixtures. These are foundations, not a working autonomous PM/engineer/QA pipeline: the model/tool loop, provider-to-worker wiring, sandbox execution integration, real verification evidence, and final patch delivery remain unfinished. Do not treat passing fixture tests as evidence that agents executed or tested project code.
 
 ## Learn More
 

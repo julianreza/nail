@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 type SectionKind = "projects" | "agents" | "tasks" | "approvals" | "providers";
@@ -174,15 +175,29 @@ export default function SectionView({ kind }: { kind: SectionKind }) {
         <SectionEmptyState kind={kind} />
       ) : (
         <ul className="record-list">
-          {items?.map((item, index) => (
-            <li className="record-card" key={typeof item.id === "string" ? item.id : index}>
-              <span aria-hidden="true" className="record-mark">{config.title.slice(0, 1)}</span>
-              <span className="record-copy">
-                <strong>{itemTitle(kind, item)}</strong>
-                <span>{itemDetail(kind, item)}</span>
-              </span>
-            </li>
-          ))}
+          {items?.map((item, index) => {
+            const record = (
+              <>
+                <span aria-hidden="true" className="record-mark">{config.title.slice(0, 1)}</span>
+                <span className="record-copy">
+                  <strong>{itemTitle(kind, item)}</strong>
+                  <span>{itemDetail(kind, item)}</span>
+                </span>
+              </>
+            );
+            const key = typeof item.id === "string" ? item.id : index;
+            return (
+              <li key={key}>
+                {kind === "projects" && typeof item.id === "string" ? (
+                  <Link className="record-card record-card-link" href={`/projects/${encodeURIComponent(item.id)}`}>
+                    {record}
+                  </Link>
+                ) : (
+                  <div className="record-card">{record}</div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>

@@ -297,8 +297,10 @@ export class RootlessDockerSandbox {
     }
 
     const controller = new AbortController();
+    let stopPromise: Promise<void> | undefined;
     const stopOnAbort = () => {
-      void this.stop(handle).catch(() => undefined);
+      stopPromise ??= this.stop(handle);
+      void stopPromise.catch(() => undefined);
     };
     controller.signal.addEventListener("abort", stopOnAbort, { once: true });
     const externalAbort = () => controller.abort(externalSignal?.reason);
@@ -314,13 +316,19 @@ export class RootlessDockerSandbox {
         timeoutMs: SANDBOX_POLICY.timeoutMs,
       });
       if (controller.signal.aborted) {
+        throw new Error("Sandbox command interrupted");
+      }
+      return outputWithinLimit(result);
+    } catch (error) {
+      if (controller.signal.aborted) {
+        await stopPromise;
         throw new Error(
           controller.signal.reason === "sandbox_timeout"
             ? "Sandbox command timed out"
             : "Sandbox command cancelled",
         );
       }
-      return outputWithinLimit(result);
+      throw error;
     } finally {
       clearTimeout(timeout);
       controller.signal.removeEventListener("abort", stopOnAbort);

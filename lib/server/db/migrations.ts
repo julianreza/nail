@@ -180,6 +180,61 @@ const migrations: readonly Migration[] = [
       CREATE INDEX checkpoints_run_created_idx ON checkpoints(run_id, created_at);
     `,
   },
+  {
+    version: 4,
+    name: "finite_run_usage_budgets",
+    sql: `
+      CREATE TABLE run_usage_budgets (
+        run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+        max_requests INTEGER NOT NULL CHECK (max_requests > 0),
+        max_tool_calls INTEGER NOT NULL CHECK (max_tool_calls >= 0),
+        max_output_tokens INTEGER NOT NULL CHECK (max_output_tokens > 0),
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+    `,
+  },
+  {
+    version: 5,
+    name: "usage_reservation_state",
+    sql: `
+      ALTER TABLE usage_records
+      ADD COLUMN usage_state TEXT NOT NULL DEFAULT 'known' CHECK (usage_state IN ('known', 'reserved', 'unknown'));
+    `,
+  },
+  {
+    version: 6,
+    name: "run_plans",
+    sql: `
+      CREATE TABLE run_plans (
+        run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+        plan_version INTEGER NOT NULL CHECK (plan_version > 0),
+        goal TEXT NOT NULL,
+        acceptance_criteria_json TEXT NOT NULL,
+        setup_commands_json TEXT NOT NULL,
+        verification_commands_json TEXT NOT NULL,
+        allowed_tools_json TEXT NOT NULL,
+        approval_id TEXT NOT NULL REFERENCES approvals(id),
+        approval_fingerprint TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+    `,
+  },
+  {
+    version: 7,
+    name: "qa_rounds",
+    sql: `
+      CREATE TABLE qa_rounds (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+        round_number INTEGER NOT NULL CHECK (round_number > 0),
+        status TEXT NOT NULL CHECK (status IN ('passed', 'failed')),
+        details TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        UNIQUE (run_id, round_number)
+      );
+      CREATE INDEX qa_rounds_run_number_idx ON qa_rounds(run_id, round_number);
+    `,
+  },
 ];
 
 export function migrateDatabase(database: DatabaseSync): void {

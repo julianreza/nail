@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import {
@@ -94,36 +94,54 @@ async function dockerOk(args: string[], options?: { signal?: AbortSignal; timeou
   return result.stdout;
 }
 
-function controllersForCurrentCgroup(): string[] {
+export function getDelegatedControllers(
+  delegation: string,
+  availableControllers: readonly string[],
+): string[] {
+  if (delegation.toLowerCase() !== "yes") return [];
+  const available = new Set(availableControllers);
+  return ["cpu", "memory", "pids"].filter((controller) => available.has(controller));
+}
+
+function controllersForRootlessDockerService(): string[] {
   try {
-    const entry = readFileSync("/proc/self/cgroup", "utf8")
-      .split("\n")
-      .find((line) => line.startsWith("0::"));
-    if (!entry) return [];
-    const relativeCgroup = entry.slice(3).replace(/^\/+/, "");
-    const current = `/sys/fs/cgroup/${relativeCgroup}`;
-    const available = readFileSync(`${current}/cgroup.controllers`, "utf8")
+    const values = execFileSync(
+      "systemctl",
+      ["--user", "show", "docker.service", "--property=ControlGroup", "--property=Delegate", "--value"],
+      {
+        encoding: "utf8",
+        timeout: 5000,
+        env: process.env,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    ).trim().split("\n");
+    const [controlGroup, delegated] = values;
+    if (!controlGroup?.startsWith("/user.slice/") || controlGroup.includes("..")) return [];
+    const controlPath = `/sys/fs/cgroup${controlGroup}`;
+    const available = readFileSync(`${controlPath}/cgroup.controllers`, "utf8")
       .trim()
       .split(/\s+/)
       .filter(Boolean);
-    const delegated = readFileSync(`${current}/cgroup.subtree_control`, "utf8")
-      .trim()
-      .split(/\s+/)
-      .map((value) => value.replace(/^\+/, ""))
-      .filter(Boolean);
-    const delegatedSet = new Set(delegated);
-    return available.filter((controller) => delegatedSet.has(controller));
+    return getDelegatedControllers(delegated ?? "no", available);
   } catch {
     return [];
   }
 }
 
-function parseInspect(raw: string): DockerInspectRecord {
-  const parsed: unknown = JSON.parse(raw);
-  if (!Array.isArray(parsed) || parsed.length !== 1) {
+export function parseDockerInspectRecord(parsed: unknown): DockerInspectRecord {
+  const record = Array.isArray(parsed)
+    ? parsed.length === 1
+      ? parsed[0]
+      : null
+    : parsed;
+  if (typeof record !== "object" || record === null || Array.isArray(record)) {
     throw new Error("Unexpected Docker inspect result");
   }
-  return parsed[0] as DockerInspectRecord;
+  return record as DockerInspectRecord;
+}
+
+function parseInspect(raw: string): DockerInspectRecord {
+  return parseDockerInspectRecord(JSON.parse(raw));
 }
 
 function effectiveCpuLimit(host: NonNullable<DockerInspectRecord["HostConfig"]>): number {
@@ -144,7 +162,7 @@ export class DockerCliDriver implements DockerDriver {
         dockerAvailable: true,
         rootless: securityOptions.some((item) => item.toLowerCase().includes("rootless")),
         cgroupVersion: info.CgroupVersion === "2" ? "2" : info.CgroupVersion === "1" ? "1" : "unknown",
-        delegatedControllers: controllersForCurrentCgroup(),
+        delegatedControllers: controllersForRootlessDockerService(),
       };
     } catch {
       return {
