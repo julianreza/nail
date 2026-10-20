@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
+
 export default function LoginForm() {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -37,29 +38,34 @@ export default function LoginForm() {
   }
 
   return (
-    <form className="flex w-full max-w-sm flex-col gap-4" onSubmit={submit}>
-      <label className="flex flex-col gap-2 text-sm font-medium" htmlFor="password">
+    <form className="login-form" onSubmit={submit} aria-busy={pending}>
+      <label className="login-label" htmlFor="password">
         Kata sandi owner
         <input
           autoComplete="current-password"
-          className="rounded-lg border border-zinc-400 px-3 py-2"
+          aria-describedby="password-help"
+          className="login-input"
           id="password"
           name="password"
           required
           type="password"
         />
       </label>
+      <p className="login-help" id="password-help">
+        Gunakan kata sandi owner untuk membuka workspace.
+      </p>
       {error ? (
-        <p className="text-sm text-red-700" role="alert">
+        <p className="login-error" role="alert">
           {error}
         </p>
       ) : null}
       <button
-        className="rounded-lg bg-zinc-900 px-4 py-2 font-semibold text-white disabled:opacity-60"
+        className="login-submit"
         disabled={pending}
         type="submit"
       >
         {pending ? "Memeriksa…" : "Masuk"}
+        <span aria-hidden="true">→</span>
       </button>
     </form>
   );

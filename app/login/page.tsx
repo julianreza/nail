@@ -1,20 +1,38 @@
 import LoginForm from "./login-form";
+import "./login.css";
 
 export default function LoginPage() {
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
-      <section className="flex w-full max-w-lg flex-col gap-6 rounded-2xl border border-zinc-300 bg-white p-8 shadow-lg">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-wide text-zinc-600">
-            Nail · Area owner
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold">Masuk</h1>
-          <p className="mt-2 text-zinc-600">
-            Akses hanya untuk owner. Pendaftaran publik tidak tersedia.
-          </p>
+    <main className="login-page">
+      <div className="login-shell">
+        <div className="login-brand-row">
+          <div className="workspace-brand">
+            <span className="workspace-brand-mark" aria-hidden="true">N</span>
+            <span>
+              <strong>Nail</strong>
+              <small>Agent workspace</small>
+            </span>
+          </div>
+          <span className="login-access-tag">Workspace pribadi</span>
         </div>
-        <LoginForm />
-      </section>
+
+        <section className="login-card" aria-labelledby="login-title">
+          <header className="login-intro">
+            <p className="eyebrow">AREA OWNER</p>
+            <h1 className="login-title" id="login-title">Masuk ke workspace</h1>
+            <p className="login-description">
+              Satu tempat untuk proyek, agent, dan approval kamu.
+            </p>
+          </header>
+          <div className="login-body">
+            <LoginForm />
+            <p className="login-access-note">
+              Akses hanya untuk owner. Pendaftaran publik tidak tersedia.
+            </p>
+          </div>
+        </section>
+        <p className="login-caption">Workspace kamu. Tetap dalam kendalimu.</p>
+      </div>
     </main>
   );
 }
