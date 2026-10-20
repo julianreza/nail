@@ -12,7 +12,7 @@ export default function LogoutButton() {
 
   return (
     <button
-      className="rounded-lg border border-zinc-400 px-3 py-2 text-sm font-medium"
+      className="workspace-logout"
       onClick={logout}
       type="button"
     >

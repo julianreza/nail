@@ -1,0 +1,37 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
+import WorkspaceShell from "../../app/workspace-shell";
+import { DashboardSummary } from "../../app/dashboard-overview";
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/providers",
+  useRouter: () => ({ replace: vi.fn() }),
+}));
+
+describe("reference workspace presentation", () => {
+  it("identifies the current page and retains one active navigation item and real destinations", () => {
+    const markup = renderToStaticMarkup(<WorkspaceShell>Content</WorkspaceShell>);
+    expect(markup).toContain('aria-label="Halaman aktif"');
+    expect(markup).toMatch(/aria-label="Halaman aktif"[^>]*>Providers</);
+    expect(markup.match(/aria-current="page"/g)).toHaveLength(1);
+    for (const href of ["/", "/projects", "/agents", "/tasks", "/approvals", "/providers", "/settings"]) {
+      expect(markup).toContain(`href="${href}"`);
+    }
+    expect(markup).toContain("Content");
+    expect(markup).not.toContain('type="search"');
+  });
+
+  it.each([0, 7])("shows real project/agent counts in the hero and links to actual projects (%s projects)", (projectsCount) => {
+    const markup = renderToStaticMarkup(createElement(DashboardSummary, {
+      overview: { projectsCount, agentsCount: 2, activeRunsCount: 0, queuedRunsCount: 0, pendingApprovalsCount: 0 },
+    }));
+    expect(markup).toContain('aria-label="Status workspace"');
+    expect(markup).toContain(`${projectsCount} project`);
+    expect(markup).toContain("2 agent");
+    expect(markup).toContain('href="/projects"');
+    expect(markup).toContain("Buka projects");
+    expect(markup).not.toContain("Rp");
+    expect(markup).not.toContain("+24");
+  });
+});

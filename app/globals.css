@@ -1,14 +1,19 @@
 @import "tailwindcss";
+@import "./reference-theme.css";
 
 :root {
-  --background: #f7f8f2;
-  --foreground: #173a32;
+  --background: #eef4f1;
+  --foreground: #092f2c;
   --surface: #ffffff;
-  --line: #173a32;
-  --lime: #d7f75b;
-  --lavender: #e8e4ff;
+  --line: #123e36;
+  --lime: #c6ff4a;
+  --lavender: #e9e0ff;
   --peach: #ffe0cc;
-  --muted: #60736d;
+  --muted: #48665e;
+  --sidebar: #f8fbf8;
+  --mint: #b9f3d5;
+  --ice: #d9efff;
+  --emerald: #164b3d;
 }
 
 @theme inline {
@@ -46,7 +51,7 @@ a {
 
 .workspace-layout {
   display: grid;
-  grid-template-columns: 252px minmax(0, 1fr);
+  grid-template-columns: 224px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -55,9 +60,9 @@ a {
   flex-direction: column;
   gap: 28px;
   min-height: 100vh;
-  padding: 24px 18px 18px;
-  border-right: 2px solid var(--line);
-  background: var(--lavender);
+  padding: 27px 16px 20px;
+  border-right: 1px solid #ccd6c3;
+  background: var(--sidebar);
 }
 
 .workspace-brand {
@@ -87,7 +92,9 @@ a {
 }
 
 .workspace-brand strong {
-  font-size: 18px;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.06em;
   line-height: 1.2;
 }
 
@@ -114,7 +121,7 @@ a {
 
 .workspace-nav-link {
   display: flex;
-  min-height: 42px;
+  min-height: 44px;
   align-items: center;
   gap: 11px;
   padding: 8px 10px;
@@ -133,19 +140,21 @@ a {
 
 .workspace-nav-link.is-active {
   border-color: var(--line);
-  background: var(--surface);
-  box-shadow: 3px 3px 0 var(--line);
+  background: var(--foreground);
+  color: var(--surface);
+  box-shadow: 2px 2px 0 #ccd6c3;
 }
 
 .workspace-nav-mark {
   display: grid;
-  width: 23px;
-  height: 23px;
-  flex: 0 0 23px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
   place-items: center;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--surface);
+  background: var(--lime);
+  color: var(--foreground);
   font-size: 11px;
   font-weight: 800;
 }
@@ -178,25 +187,27 @@ a {
 
 .workspace-topbar {
   display: flex;
-  min-height: 70px;
+  min-height: 56px;
   align-items: center;
   justify-content: space-between;
-  padding: 14px clamp(20px, 4vw, 48px);
-  border-bottom: 1px solid rgb(23 58 50 / 25%);
-  background: rgb(255 255 255 / 65%);
+  gap: 16px;
+  padding: 8px clamp(20px, 4vw, 48px);
+  border-bottom: 1px solid var(--line);
+  background: var(--foreground);
+  color: var(--surface);
 }
 
 .workspace-topbar p {
   margin: 0;
-  color: var(--muted);
-  font-size: 13px;
+  color: var(--surface);
+  font-size: 12px;
   font-weight: 600;
 }
 
 .workspace-content {
-  width: min(100%, 1440px);
+  width: min(100%, 1200px);
   margin: 0 auto;
-  padding: 38px clamp(20px, 4vw, 48px) 56px;
+  padding: 36px clamp(20px, 4vw, 48px) 56px;
 }
 
 .dashboard-content,
@@ -215,9 +226,10 @@ a {
 
 .dashboard-section-heading h2 {
   margin: 0;
-  font-size: clamp(26px, 3vw, 34px);
-  font-weight: 750;
-  letter-spacing: -0.04em;
+  font-size: clamp(28px, 3vw, 40px);
+  font-weight: 800;
+  letter-spacing: -0.055em;
+  line-height: 1.15;
 }
 
 .page-description {
@@ -248,26 +260,26 @@ a {
 
 .dashboard-stat-card {
   display: flex;
-  min-height: 136px;
+  min-height: 168px;
   flex-direction: column;
   justify-content: space-between;
   padding: 19px;
   border: 2px solid var(--line);
-  border-radius: 20px;
+  border-radius: 13px;
   background: var(--surface);
   box-shadow: 4px 4px 0 var(--line);
 }
 
 .dashboard-stat-card.tone-lime {
-  background: var(--lime);
+  background: var(--surface);
 }
 
 .dashboard-stat-card.tone-lavender {
-  background: var(--lavender);
+  background: var(--surface);
 }
 
 .dashboard-stat-card.tone-peach {
-  background: var(--peach);
+  background: var(--surface);
 }
 
 .stat-card-label {
@@ -381,6 +393,8 @@ a {
 
 .record-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 12px;
   margin: 0;
   padding: 0;
@@ -829,7 +843,7 @@ a {
   }
 
   .workspace-nav-link {
-    min-height: 38px;
+    min-height: 44px;
     gap: 7px;
     padding: 6px 8px;
     font-size: 11px;

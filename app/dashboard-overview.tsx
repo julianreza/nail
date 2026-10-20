@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import WorkspaceIcon from "./workspace-icon";
 
 export interface OverviewPayload {
   projectsCount: number;
@@ -25,18 +27,37 @@ function isOverviewPayload(value: unknown): value is OverviewPayload {
 }
 
 const cards = [
-  { key: "activeRunsCount", label: "Sedang berjalan", tone: "lime" },
-  { key: "queuedRunsCount", label: "Dalam antrean", tone: "lavender" },
-  { key: "pendingApprovalsCount", label: "Menunggu persetujuan", tone: "peach" },
-  { key: "projectsCount", label: "Projects", tone: "white" },
+  { key: "activeRunsCount", label: "Sedang berjalan", tone: "lime", icon: "tasks" },
+  { key: "queuedRunsCount", label: "Dalam antrean", tone: "lavender", icon: "projects" },
+  { key: "pendingApprovalsCount", label: "Menunggu persetujuan", tone: "peach", icon: "approvals" },
+  { key: "projectsCount", label: "Projects", tone: "white", icon: "projects" },
 ] as const;
 
 export function DashboardSummary({ overview }: { overview: OverviewPayload }) {
   return (
     <>
+      <section aria-label="Status workspace" className="workspace-hero">
+        <div className="workspace-hero-art" aria-hidden="true">
+          <span className="hero-sticker">Your next big thing.</span>
+          <span className="hero-emblem">N<span>NAIL WORKSPACE</span></span>
+          <span className="hero-art-caption">IDE → PROJECT → PROGRESS</span>
+        </div>
+        <div className="workspace-hero-copy">
+          <p className="eyebrow">WORKSPACE / OVERVIEW</p>
+          <h3>Ide besar.<br />Langkah <span>terarah.</span></h3>
+          <div className="hero-totals">
+            <span>{overview.projectsCount} project</span>
+            <span>{overview.agentsCount} agent</span>
+          </div>
+          <p>Atur proyek, pantau run, dan tinjau keputusan penting dari satu tempat.</p>
+          <Link href="/projects" className="button-primary hero-project-link">Buka projects <span aria-hidden="true">↗</span></Link>
+        </div>
+      </section>
+      <div className="summary-section-title"><h3>Workspace dalam angka</h3><span>Jumlah tersimpan, bukan data contoh.</span></div>
       <div className="dashboard-card-grid">
         {cards.map((card) => (
           <article className={`dashboard-stat-card tone-${card.tone}`} key={card.key}>
+            <span className="stat-card-icon"><WorkspaceIcon name={card.icon} /></span>
             <span className="stat-card-label">{card.label}</span>
             <strong className="stat-card-value">
               {new Intl.NumberFormat("id-ID").format(overview[card.key])}
@@ -102,7 +123,7 @@ export default function DashboardOverview() {
       <div className="dashboard-section-heading">
         <div>
           <p className="eyebrow">OVERVIEW</p>
-          <h2>Ringkasan workspace</h2>
+          <h2>Ringkasan <span>workspace</span></h2>
         </div>
         <span className="live-indicator"><span aria-hidden="true" /> Data langsung</span>
       </div>

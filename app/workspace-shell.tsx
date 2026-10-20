@@ -4,18 +4,21 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import LogoutButton from "./logout-button";
+import WorkspaceIcon from "./workspace-icon";
 
 const primaryLinks = [
-  { href: "/", label: "Ringkasan", mark: "R" },
-  { href: "/projects", label: "Projects", mark: "P" },
-  { href: "/agents", label: "Agents", mark: "A" },
-  { href: "/tasks", label: "Tasks", mark: "T" },
-  { href: "/approvals", label: "Approvals", mark: "✓" },
-  { href: "/providers", label: "Providers", mark: "◎" },
-];
+  { href: "/", label: "Ringkasan", icon: "overview" },
+  { href: "/projects", label: "Projects", icon: "projects" },
+  { href: "/agents", label: "Agents", icon: "agents" },
+  { href: "/tasks", label: "Tasks", icon: "tasks" },
+  { href: "/approvals", label: "Approvals", icon: "approvals" },
+  { href: "/providers", label: "Providers", icon: "providers" },
+] as const;
 
 export default function WorkspaceShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const currentPage = primaryLinks.find((link) => link.href === pathname)?.label
+    ?? (pathname.startsWith("/projects/") ? "Project detail" : "Pengaturan");
 
   return (
     <div className="workspace-layout">
@@ -39,8 +42,8 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
                 href={link.href}
                 key={link.href}
               >
-                <span aria-hidden="true" className="workspace-nav-mark">
-                  {link.mark}
+                <span aria-hidden="true" className={`workspace-nav-mark icon-${link.icon}`}>
+                  <WorkspaceIcon name={link.icon} />
                 </span>
                 <span>{link.label}</span>
               </Link>
@@ -54,7 +57,7 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
             className={`workspace-nav-link${pathname === "/settings" ? " is-active" : ""}`}
             href="/settings"
           >
-            <span aria-hidden="true" className="workspace-nav-mark">⚙</span>
+            <span aria-hidden="true" className="workspace-nav-mark icon-settings"><WorkspaceIcon name="settings" /></span>
             <span>Pengaturan</span>
           </Link>
         </nav>
@@ -67,7 +70,11 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
 
       <div className="workspace-main-column">
         <header className="workspace-topbar">
-          <p>Workspace pribadi</p>
+          <div className="workspace-topbar-context">
+            <span className="topbar-owner-badge"><span aria-hidden="true" /> OWNER</span>
+            <p aria-label="Halaman aktif">{currentPage}</p>
+            <span className="topbar-caption">Workspace pribadi, kendali penuh.</span>
+          </div>
           <LogoutButton />
         </header>
         <main className="workspace-content">{children}</main>
