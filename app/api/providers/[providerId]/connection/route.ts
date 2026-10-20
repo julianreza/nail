@@ -1,7 +1,7 @@
 import { getAuthHandlers } from "@/lib/server/auth/auth-runtime";
 import { createProviderConnectionHandler } from "@/lib/server/providers/subscription-handlers";
 import { createLocalSubscriptionConnector } from "@/lib/server/providers/subscription-connector-runtime";
-import { loadConnectorConfig } from "@/worker/providers/connector-config";
+
 
 export async function POST(
   request: Request,
@@ -21,7 +21,7 @@ export async function POST(
       auth,
       appOrigin: process.env.APP_ORIGIN,
       databasePath: process.env.NAIL_DATABASE_PATH,
-      loadConfig: loadConnectorConfig,
+
       connector: createLocalSubscriptionConnector(),
     })(providerId, request);
   } catch {

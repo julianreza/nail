@@ -37,11 +37,20 @@ export interface SubscriptionCompletion {
   finishReason: "stop";
 }
 
+export interface SubscriptionBindingDescriptor {
+  bindingId: string;
+  kind: SubscriptionProviderKind;
+  model: string;
+  enabled: boolean;
+}
+
 export interface SubscriptionConnector {
   check(bindingId: string, signal: AbortSignal): Promise<ConnectionDiagnostic>;
   cancel(bindingId: string, signal: AbortSignal): Promise<void>;
-  complete(
-    input: SubscriptionCompletionInput,
-    signal: AbortSignal,
-  ): Promise<SubscriptionCompletion>;
+  complete(input: SubscriptionCompletionInput, signal: AbortSignal):
+    Promise<SubscriptionCompletion>;
+}
+
+export interface SubscriptionConnectorControl extends SubscriptionConnector {
+  listBindings(signal: AbortSignal): Promise<SubscriptionBindingDescriptor[]>;
 }

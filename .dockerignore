@@ -1,0 +1,22 @@
+# Build outputs and local dependencies
+node_modules
+.next
+out
+coverage
+.worktrees
+.git
+.hermes
+
+# Never bake secrets or local runtime state into an image
+.env
+.env.*
+!.env.docker.example
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.pem
+
+# Local tool/cache artifacts
+.DS_Store
+npm-debug.log*
+bun-debug.log*

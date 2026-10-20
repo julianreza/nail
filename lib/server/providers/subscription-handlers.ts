@@ -1,11 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type { ConnectionDiagnostic, SubscriptionProviderKind, SubscriptionConnector } from "../../domain/subscription-provider";
+import type { ConnectionDiagnostic, SubscriptionBindingDescriptor, SubscriptionProviderKind, SubscriptionConnectorControl } from "../../domain/subscription-provider";
 import { isSameOriginRequest } from "../auth/auth-service";
 import { openDatabase, withTransaction } from "../db/database";
 import { createRepositories, type ProviderRecord } from "../db/repositories";
 import { SubscriptionProviderError } from "./subscription-errors";
-import type { ConnectorConfig, ConnectorBindingConfig } from "../../../worker/providers/connector-config";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const BINDING_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -24,8 +23,7 @@ interface SubscriptionHandlerDependencies {
   auth: AuthGuard;
   appOrigin: string | undefined;
   databasePath: string | undefined;
-  loadConfig(): ConnectorConfig;
-  connector: SubscriptionConnector;
+  connector: SubscriptionConnectorControl;
   clock?: () => string;
 }
 
@@ -61,7 +59,7 @@ function providerStatus(state: ConnectionDiagnostic["state"]): ProviderRecord["s
 
 function normalizeDiagnostic(
   diagnostic: ConnectionDiagnostic,
-  binding: ConnectorBindingConfig,
+  binding: SubscriptionBindingDescriptor,
 ): ConnectionDiagnostic {
   if (
     diagnostic.kind !== binding.kind ||
@@ -80,7 +78,7 @@ function normalizeDiagnostic(
 }
 
 function diagnosticFromError(
-  binding: ConnectorBindingConfig,
+  binding: SubscriptionBindingDescriptor,
   error: unknown,
   now: string,
 ): ConnectionDiagnostic {
@@ -165,16 +163,8 @@ async function parseRequest(request: Request, fields: readonly string[]): Promis
   return value as Record<string, unknown>;
 }
 
-function findConfiguredBinding(config: ConnectorConfig, bindingId: string): ConnectorBindingConfig | undefined {
-  return config.bindings.find((binding) => binding.bindingId === bindingId);
-}
-
-function loadConfiguration(dependencies: SubscriptionHandlerDependencies): ConnectorConfig {
-  try {
-    return dependencies.loadConfig();
-  } catch {
-    throw new SubscriptionProviderError("unavailable");
-  }
+function findBinding(bindings: readonly SubscriptionBindingDescriptor[], bindingId: string): SubscriptionBindingDescriptor | undefined {
+  return bindings.find((binding) => binding.bindingId === bindingId);
 }
 
 export function createSubscriptionProviderHandler(dependencies: SubscriptionHandlerDependencies) {
@@ -189,13 +179,13 @@ export function createSubscriptionProviderHandler(dependencies: SubscriptionHand
       typeof body.model !== "string" || !MODEL_ID.test(body.model)
     ) return json({ error: "Provider details are invalid" }, 400);
 
-    let config: ConnectorConfig;
+    let bindings: SubscriptionBindingDescriptor[];
     try {
-      config = loadConfiguration(dependencies);
+      bindings = await dependencies.connector.listBindings(AbortSignal.timeout(5_000));
     } catch {
       return json({ error: "Provider connector is not configured" }, 503);
     }
-    const binding = findConfiguredBinding(config, body.bindingId);
+    const binding = findBinding(bindings, body.bindingId);
     if (!binding || !binding.enabled || binding.kind !== body.kind || binding.model !== body.model) {
       return json({ error: "Provider binding does not match administrator configuration" }, 400);
     }
@@ -289,10 +279,19 @@ export function createProviderConnectionHandler(dependencies: SubscriptionHandle
       }
       const binding = repositories.accountBindings.getByProviderId(providerId);
       if (!binding) return json({ error: "Provider binding not found" }, 404);
+      let bindingList: SubscriptionBindingDescriptor[];
+      try {
+        bindingList = await dependencies.connector.listBindings(AbortSignal.timeout(5_000));
+      } catch {
+        return json({ error: "Provider connector is not configured" }, 503);
+      }
+      const configuredBinding = findBinding(bindingList, binding.bindingId);
+      if (
+        !configuredBinding || configuredBinding.kind !== provider.kind ||
+        configuredBinding.model !== provider.model || !configuredBinding.enabled
+      ) return json({ error: "Provider binding does not match administrator configuration" }, 409);
 
       if (body.action === "disconnect") {
-        const config = loadConfiguration(dependencies);
-        if (!findConfiguredBinding(config, binding.bindingId)) return json({ error: "Provider binding not found" }, 404);
         await dependencies.connector.cancel(binding.bindingId, AbortSignal.timeout(5_000)).catch(() => {
           throw new SubscriptionProviderError("unavailable");
         });
@@ -308,11 +307,6 @@ export function createProviderConnectionHandler(dependencies: SubscriptionHandle
         return json({ provider: safeProvider(repositories.providers.getById(providerId)!), disconnected: true }, 200);
       }
 
-      const config = loadConfiguration(dependencies);
-      const configuredBinding = findConfiguredBinding(config, binding.bindingId);
-      if (!configuredBinding || configuredBinding.kind !== provider.kind || configuredBinding.model !== provider.model) {
-        return json({ error: "Provider binding does not match administrator configuration" }, 409);
-      }
       let diagnostic: ConnectionDiagnostic;
       try {
         diagnostic = normalizeDiagnostic(

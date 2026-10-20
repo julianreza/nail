@@ -79,6 +79,21 @@ describe("subscription connector configuration", () => {
       .toThrowError(new ConnectorConfigurationError("invalid_configuration"));
   });
 
+  it("allows the app socket directory to be separate from the private account data root", () => {
+    const separated = fixture();
+    const socketDirectory = join(separated.root, "socket-run");
+    mkdirSync(socketDirectory, { mode: 0o700 });
+    const socketPath = join(socketDirectory, "provider.sock");
+    const environment = { ...separated.environment, NAIL_CONNECTOR_SOCKET: socketPath };
+    const loaded = loadConnectorConfig(environment, {
+      applicationRoot: join(separated.root, "app"),
+      sandboxRoot: join(separated.root, "sandbox"),
+      personalHome: separated.personalHome,
+    });
+    expect(loaded.socketPath).toBe(socketPath);
+    expect(loaded.bindingsFilePath).toBe(separated.bindingsFile);
+  });
+
   it("rejects unsafe config permissions, invalid account homes and symlink escapes", () => {
     const insecureConfig = fixture();
     chmodSync(insecureConfig.bindingsFile, 0o644);

@@ -214,7 +214,13 @@ export function loadConnectorConfig(
   assertOwned(root, 0o077, true);
 
   const socketPath = resolve(socketSetting);
-  if (dirname(socketPath) !== root || basename(socketPath) !== "provider.sock") return invalid();
+  if (socketPath !== socketSetting || basename(socketPath) !== "provider.sock") return invalid();
+  const socketRootSetting = dirname(socketPath);
+  const socketRoot = canonical(socketRootSetting);
+  if (socketRoot !== socketRootSetting) return invalid();
+  assertOwned(socketRoot, 0o077, true);
+  if (dirname(socketPath) !== socketRoot) return invalid();
+  if (socketRoot !== root && pathsOverlap(socketRoot, root)) return invalid();
   try {
     const socketStat = lstatSync(socketPath);
     if (!socketStat.isSocket() || socketStat.isSymbolicLink()) return invalid();
@@ -227,7 +233,7 @@ export function loadConnectorConfig(
   if (options.sandboxRoot) forbiddenRoots.push(resolve(options.sandboxRoot));
   const personalHome = options.personalHome ?? environment.HOME;
   if (personalHome) forbiddenRoots.push(resolve(personalHome));
-  if (forbiddenRoots.some((rootPath) => pathsOverlap(root, rootPath))) return invalid();
+  if ([root, socketRoot].some((trustedRoot) => forbiddenRoots.some((rootPath) => pathsOverlap(trustedRoot, rootPath)))) return invalid();
 
   return {
     socketPath,

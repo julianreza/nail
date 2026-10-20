@@ -5,6 +5,7 @@ import {
   SUBSCRIPTION_PROVIDER_KINDS,
   type ConnectionDiagnostic,
   type SubscriptionCompletion,
+  type SubscriptionBindingDescriptor,
   type SubscriptionConnector,
   type SubscriptionProviderKind,
 } from "../../lib/domain/subscription-provider";
@@ -24,8 +25,8 @@ const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 interface WireRequest {
   v: 1;
-  op: "check" | "cancel" | "complete";
-  bindingId: string;
+  op: "list" | "check" | "cancel" | "complete";
+  bindingId?: string;
   prompt?: string;
   model?: string;
   maxOutputTokens?: number;
@@ -113,7 +114,14 @@ function parseRequest(bytes: Buffer): WireRequest {
   } catch {
     throw new SubscriptionProviderError("invalid_binding");
   }
-  if (!isRecord(parsed) || parsed.v !== 1 || typeof parsed.op !== "string" || typeof parsed.bindingId !== "string" || !BINDING_ID.test(parsed.bindingId)) {
+  if (!isRecord(parsed) || parsed.v !== 1 || typeof parsed.op !== "string") {
+    throw new SubscriptionProviderError("invalid_binding");
+  }
+  if (parsed.op === "list") {
+    if (!exactFields(parsed, ["op", "v"])) throw new SubscriptionProviderError("invalid_binding");
+    return { v: 1, op: "list" };
+  }
+  if (typeof parsed.bindingId !== "string" || !BINDING_ID.test(parsed.bindingId)) {
     throw new SubscriptionProviderError("invalid_binding");
   }
   if (parsed.op === "check" || parsed.op === "cancel") {
@@ -274,9 +282,18 @@ async function dispatchRequest(
   adapters: Map<SubscriptionProviderKind, SubscriptionConnector>,
   active: Map<string, ActiveInvocation>,
   isShuttingDown: () => boolean,
-): Promise<ConnectionDiagnostic | SubscriptionCompletion | null> {
+): Promise<ConnectionDiagnostic | SubscriptionBindingDescriptor[] | SubscriptionCompletion | null> {
   if (isShuttingDown()) throw new SubscriptionProviderError("unavailable");
   const request = parseRequest(bytes);
+  if (request.op === "list") {
+    return [...bindings.values()].map(({ bindingId, kind, model, enabled }) => ({
+      bindingId,
+      kind,
+      model,
+      enabled,
+    }));
+  }
+  if (!request.bindingId) throw new SubscriptionProviderError("invalid_binding");
   const binding = bindings.get(request.bindingId);
   if (!binding || !binding.enabled) throw new SubscriptionProviderError("invalid_binding");
   const adapter = adapters.get(binding.kind);

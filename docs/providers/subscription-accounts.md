@@ -8,12 +8,14 @@ The panel does not accept API keys or login tokens. The owner must install and a
 
 ## Connector configuration
 
-Set these server-only variables for both the connector process and Next.js server:
+Set these server-only variables for the connector process:
 
 - `NAIL_CONNECTOR_SOCKET`: absolute path to the private Unix socket.
 - `NAIL_CONNECTOR_BINDINGS_FILE`: absolute path to the owner-only JSON config named `bindings.json`.
 
-The config parent is the connector data root. It must be a real directory owned by the service account with mode `0700`; `bindings.json` must be owned by the service account with mode `0600`. The socket path must be `<connector-root>/provider.sock`; it is created with mode `0600`. The connector rejects a pre-existing socket path rather than deleting it.
+Next.js needs only `NAIL_CONNECTOR_SOCKET`. It discovers safe binding metadata through that socket; do not mount the bindings file or account homes into the web container.
+
+The config parent is the connector data root. It must be a real directory owned by the service account with mode `0700`; `bindings.json` must be owned by the service account with mode `0600`. The socket basename must be `provider.sock`; its parent must also be a real, service-owned `0700` directory. It may be the connector root or a separate non-overlapping directory for sharing only the socket with the web container. The socket is created with mode `0600`. The connector rejects a pre-existing socket path rather than deleting it. See `../docker-runtime.md` for the container layout.
 
 Create `<connector-root>/accounts/<bindingId>` with mode `0700` for each dedicated vendor home. Never use a personal interactive home or the Nail repo. The file format is versioned and has exact fields:
 

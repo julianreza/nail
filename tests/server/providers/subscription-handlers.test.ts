@@ -2,13 +2,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { SubscriptionConnector } from "../../../lib/domain/subscription-provider";
+import type { SubscriptionConnector, SubscriptionConnectorControl } from "../../../lib/domain/subscription-provider";
 import { openDatabase, createRepositories } from "../../../lib/server/db/database";
 import {
   createProviderConnectionHandler,
   createSubscriptionProviderHandler,
 } from "../../../lib/server/providers/subscription-handlers";
-import type { ConnectorConfig } from "../../../worker/providers/connector-config";
 
 const origin = "http://localhost:3000";
 const directories: string[] = [];
@@ -21,17 +20,18 @@ const binding = {
   enabled: true,
 };
 
-function setup(options: { authenticated?: boolean; connector?: Partial<SubscriptionConnector> } = {}) {
+function setup(options: { authenticated?: boolean; connector?: Partial<SubscriptionConnectorControl> } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "nail-subscription-handlers-"));
   directories.push(directory);
   const databasePath = join(directory, "app.sqlite");
-  const config: ConnectorConfig = {
-    socketPath: join(directory, "provider.sock"),
-    bindingsFilePath: join(directory, "bindings.json"),
-    bindings: [binding],
-  };
   let cancelCalls = 0;
-  const defaultConnector: SubscriptionConnector = {
+  const defaultConnector: SubscriptionConnectorControl = {
+    listBindings: async () => [{
+      bindingId: binding.bindingId,
+      kind: binding.kind,
+      model: binding.model,
+      enabled: binding.enabled,
+    }],
     check: async () => ({
       kind: "codex", state: "not_installed", reason: "cli_not_installed", model: null,
       checkedAt: "2026-10-20T00:00:00.000Z",
@@ -48,13 +48,11 @@ function setup(options: { authenticated?: boolean; connector?: Partial<Subscript
     },
     appOrigin: origin,
     databasePath,
-    loadConfig: () => config,
     connector,
     clock: () => "2026-10-20T00:00:00.000Z",
   };
   return {
     databasePath,
-    config,
     connector,
     getCancelCalls: () => cancelCalls,
     setupProvider: createSubscriptionProviderHandler(dependencies),

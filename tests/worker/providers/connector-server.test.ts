@@ -81,6 +81,12 @@ describe("private subscription connector socket", () => {
     });
     try {
       const client = createSubscriptionConnectorClient(config.socketPath);
+      await expect(client.listBindings(new AbortController().signal)).resolves.toEqual([{
+        bindingId: binding.bindingId,
+        kind: "codex",
+        model: binding.model,
+        enabled: true,
+      }]);
       await expect(client.check(binding.bindingId, new AbortController().signal)).resolves.toEqual({
         kind: "codex",
         state: "unsupported",

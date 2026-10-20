@@ -5,7 +5,8 @@ import {
   type ConnectionDiagnostic,
   type SubscriptionCompletion,
   type SubscriptionCompletionInput,
-  type SubscriptionConnector,
+  type SubscriptionConnectorControl,
+  type SubscriptionBindingDescriptor,
   type SubscriptionProviderKind,
 } from "../../domain/subscription-provider";
 import {
@@ -140,11 +141,38 @@ function parseCompletion(value: unknown): SubscriptionCompletion {
   };
 }
 
-export function createSubscriptionConnectorClient(socketPath: string): SubscriptionConnector {
+function parseBindings(value: unknown): SubscriptionBindingDescriptor[] {
+  if (!Array.isArray(value) || value.length > 3) throw new SubscriptionProviderError("invalid_output");
+  const ids = new Set<string>();
+  const kinds = new Set<string>();
+  return value.map((item) => {
+    if (
+      !isRecord(item) || !exactFields(item, ["bindingId", "kind", "model", "enabled"]) ||
+      typeof item.bindingId !== "string" || !BINDING_ID.test(item.bindingId) ||
+      !SUBSCRIPTION_PROVIDER_KINDS.includes(item.kind as SubscriptionProviderKind) ||
+      typeof item.model !== "string" || !MODEL_ID.test(item.model) ||
+      typeof item.enabled !== "boolean" || ids.has(item.bindingId) || kinds.has(String(item.kind))
+    ) throw new SubscriptionProviderError("invalid_output");
+    ids.add(item.bindingId);
+    kinds.add(String(item.kind));
+    return {
+      bindingId: item.bindingId,
+      kind: item.kind as SubscriptionProviderKind,
+      model: item.model,
+      enabled: item.enabled,
+    };
+  });
+}
+
+export function createSubscriptionConnectorClient(socketPath: string): SubscriptionConnectorControl {
   if (!isAbsolute(socketPath) || Buffer.byteLength(socketPath, "utf8") > 100) {
     throw new SubscriptionProviderError("invalid_binding");
   }
   return {
+    async listBindings(signal) {
+      const result = await sendRequest(socketPath, { v: 1, op: "list" }, signal, 5_000);
+      return parseBindings(result);
+    },
     async check(bindingId, signal) {
       if (!BINDING_ID.test(bindingId)) throw new SubscriptionProviderError("invalid_binding");
       return parseDiagnostic(await sendRequest(socketPath, { v: 1, op: "check", bindingId }, signal, 10_000));
