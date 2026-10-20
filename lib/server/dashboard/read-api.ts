@@ -76,15 +76,22 @@ export function createDashboardReadHandlers(
     },
     providers(request: Request): Promise<Response> {
       return read(request, (_database, repositories) =>
-        repositories.providers.list().map((provider) => ({
-          id: provider.id,
-          name: provider.name,
-          status: provider.status,
-          model: provider.model,
-          authMode: provider.authMode,
-          capabilities: provider.capabilities,
-          createdAt: provider.createdAt,
-        })),
+        repositories.providers.list().map((provider) => {
+          const binding = repositories.accountBindings.getByProviderId(provider.id);
+          return {
+            id: provider.id,
+            name: provider.name,
+            kind: provider.kind,
+            status: provider.status,
+            model: provider.model,
+            authMode: provider.authMode,
+            capabilities: provider.capabilities,
+            createdAt: provider.createdAt,
+            connection: binding
+              ? { state: binding.state, reason: binding.reason, checkedAt: binding.checkedAt }
+              : null,
+          };
+        }),
       );
     },
   };

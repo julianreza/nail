@@ -263,6 +263,22 @@ const migrations: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 9,
+    name: "subscription_binding_generation",
+    sql: `
+      ALTER TABLE providers
+      ADD COLUMN binding_generation INTEGER NOT NULL DEFAULT 0 CHECK (binding_generation >= 0);
+    `,
+  },
+  {
+    version: 10,
+    name: "subscription_binding_generation_cas",
+    sql: `
+      ALTER TABLE provider_account_bindings
+      ADD COLUMN generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0);
+    `,
+  },
 ];
 
 export function migrateDatabase(database: DatabaseSync): void {

@@ -31,7 +31,9 @@ export interface DeepSeekProviderSetupInput {
   model: string;
 }
 
-export type SafeProviderRecord = Omit<ProviderRecord, "secretReference">;
+export type SafeProviderRecord = Pick<ProviderRecord,
+  "id" | "name" | "kind" | "status" | "model" | "authMode" | "capabilities" | "createdAt"
+>;
 
 function validateInput(input: DeepSeekProviderSetupInput): void {
   if (

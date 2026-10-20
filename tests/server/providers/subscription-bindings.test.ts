@@ -29,7 +29,10 @@ describe("subscription provider bindings", () => {
     });
     database.exec(`
       DROP INDEX subscription_provider_kind_unique;
+      DELETE FROM schema_migrations WHERE version = 10;
       DROP TABLE provider_account_bindings;
+      ALTER TABLE providers DROP COLUMN binding_generation;
+      DELETE FROM schema_migrations WHERE version = 9;
       ALTER TABLE providers DROP COLUMN kind;
       DELETE FROM schema_migrations WHERE version = 8;
     `);
@@ -66,12 +69,14 @@ describe("subscription provider bindings", () => {
         providerId: "codex-provider",
         bindingId: "codex-owner",
         state: "needs_login",
+        generation: 0,
         revision: 0,
       });
       expect(repositories.accountBindings.updateDiagnostic({
         providerId: provider.id,
         bindingId: binding.bindingId,
         expectedRevision: 0,
+        expectedGeneration: 0,
         state: "connected",
         reason: null,
         checkedAt: "2026-10-20T00:00:00.000Z",
@@ -84,6 +89,7 @@ describe("subscription provider bindings", () => {
         providerId: provider.id,
         bindingId: binding.bindingId,
         expectedRevision: 0,
+        expectedGeneration: 0,
         state: "ready",
         reason: null,
         checkedAt: "2026-10-20T00:00:01.000Z",
@@ -91,6 +97,39 @@ describe("subscription provider bindings", () => {
       expect(repositories.accountBindings.delete(provider.id)).toBe(true);
       expect(repositories.accountBindings.getByProviderId(provider.id)).toBeNull();
       expect(repositories.accountBindings.delete(provider.id)).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps binding revisions monotonic across disconnect and reattach", () => {
+    const database = openDatabase(databasePath());
+    const repositories = createRepositories(database);
+    try {
+      const provider = repositories.providers.create({
+        id: "codex-provider", name: "Codex", kind: "codex", status: "unavailable", authMode: "subscription_cli",
+      });
+      const first = repositories.accountBindings.create({
+        providerId: provider.id, bindingId: "codex-owner", state: "connected",
+      });
+      expect(first.revision).toBe(0);
+      expect(first.generation).toBe(0);
+      expect(repositories.providers.advanceBindingGeneration(provider.id)).toBe(1);
+      expect(repositories.accountBindings.delete(provider.id)).toBe(true);
+      const rebound = repositories.accountBindings.create({
+        providerId: provider.id, bindingId: "codex-owner", state: "needs_login",
+      });
+      expect(rebound.revision).toBe(0);
+      expect(rebound.generation).toBe(1);
+      expect(repositories.accountBindings.updateDiagnostic({
+        providerId: provider.id,
+        bindingId: first.bindingId,
+        expectedRevision: first.revision,
+        expectedGeneration: first.generation,
+        state: "ready",
+        reason: null,
+        checkedAt: "2026-10-20T00:00:01.000Z",
+      })).toBe(false);
     } finally {
       database.close();
     }

@@ -36,6 +36,7 @@ export interface ProviderRecord {
   authMode: ProviderAuthMode;
   secretReference: string | null;
   capabilities: string[];
+  bindingGeneration: number;
   createdAt: string;
 }
 
@@ -45,6 +46,7 @@ export interface ProviderAccountBindingRecord {
   state: ConnectionState;
   reason: string | null;
   checkedAt: string | null;
+  generation: number;
   revision: number;
 }
 
@@ -323,6 +325,22 @@ export function createRepositories(database: DatabaseSync) {
           .changes === 1
       );
     },
+    advanceBindingGeneration(id: string): number | null {
+      const update = database.prepare(
+        `UPDATE providers SET binding_generation = binding_generation + 1
+         WHERE id = ? AND auth_mode = 'subscription_cli' AND secret_reference IS NULL`,
+      ).run(id);
+      if (update.changes !== 1) return null;
+      return this.getById(id)?.bindingGeneration ?? null;
+    },
+    updateSubscriptionConfiguration(id: string, model: string): boolean {
+      if (!model || model.length > 128) throw new Error("Provider model is invalid");
+      return database.prepare(
+        `UPDATE providers SET model = ?, status = 'unavailable'
+         WHERE id = ? AND auth_mode = 'subscription_cli'
+           AND kind IS NOT NULL AND kind <> 'deepseek' AND secret_reference IS NULL`,
+      ).run(model, id).changes === 1;
+    },
     list(): ProviderRecord[] {
       return listRecords<
         Omit<ProviderRecord, "capabilities"> & { capabilitiesJson: string }
@@ -353,15 +371,15 @@ export function createRepositories(database: DatabaseSync) {
         throw new Error("Subscription binding requires a secret-free subscription provider");
       }
       database.prepare(
-        `INSERT INTO provider_account_bindings (provider_id, binding_id, state)
-         VALUES (?, ?, ?)`,
-      ).run(input.providerId, input.bindingId, input.state);
+        `INSERT INTO provider_account_bindings (provider_id, binding_id, state, revision, generation)
+         VALUES (?, ?, ?, 0, ?)`,
+      ).run(input.providerId, input.bindingId, input.state, provider.bindingGeneration);
       return this.getByProviderId(input.providerId)!;
     },
     getByProviderId(providerId: string): ProviderAccountBindingRecord | null {
       const row = database.prepare(
         `SELECT provider_id AS providerId, binding_id AS bindingId, state,
-                reason, checked_at AS checkedAt, revision
+                reason, checked_at AS checkedAt, generation, revision
          FROM provider_account_bindings WHERE provider_id = ?`,
       ).get(providerId);
       return row === undefined ? null : mapRow<ProviderAccountBindingRecord>(row);
@@ -370,12 +388,14 @@ export function createRepositories(database: DatabaseSync) {
       providerId: string;
       bindingId: string;
       expectedRevision: number;
+      expectedGeneration: number;
       state: ConnectionState;
       reason: string | null;
       checkedAt: string;
     }): boolean {
       if (
         !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0 ||
+        !Number.isSafeInteger(input.expectedGeneration) || input.expectedGeneration < 0 ||
         (input.reason !== null && input.reason.length > 256) ||
         input.checkedAt.length > 64
       ) {
@@ -384,7 +404,12 @@ export function createRepositories(database: DatabaseSync) {
       return database.prepare(
         `UPDATE provider_account_bindings
          SET state = ?, reason = ?, checked_at = ?, revision = revision + 1
-         WHERE provider_id = ? AND binding_id = ? AND revision = ?`,
+         WHERE provider_id = ? AND binding_id = ? AND revision = ? AND generation = ?
+           AND EXISTS (
+             SELECT 1 FROM providers
+             WHERE providers.id = provider_account_bindings.provider_id
+               AND providers.binding_generation = ?
+           )`,
       ).run(
         input.state,
         input.reason,
@@ -392,6 +417,8 @@ export function createRepositories(database: DatabaseSync) {
         input.providerId,
         input.bindingId,
         input.expectedRevision,
+        input.expectedGeneration,
+        input.expectedGeneration,
       ).changes === 1;
     },
     delete(providerId: string): boolean {

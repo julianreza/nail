@@ -96,10 +96,32 @@ describe("authenticated dashboard read APIs", () => {
     repositories.providers.create({
       id: "provider-1",
       name: "DeepSeek",
+      kind: "deepseek",
       status: "ready",
       authMode: "api_key",
       secretReference: "vault://private/provider-key",
       capabilities: ["tools"],
+    });
+    repositories.providers.create({
+      id: "provider-2",
+      name: "Codex Subscription",
+      kind: "codex",
+      status: "unavailable",
+      authMode: "subscription_cli",
+    });
+    repositories.accountBindings.create({
+      providerId: "provider-2",
+      bindingId: "codex-owner",
+      state: "unsupported",
+    });
+    repositories.accountBindings.updateDiagnostic({
+      providerId: "provider-2",
+      bindingId: "codex-owner",
+      expectedRevision: 0,
+      expectedGeneration: 0,
+      state: "unsupported",
+      reason: "auth_status_unverified",
+      checkedAt: "2026-10-20T00:00:00.000Z",
     });
     repositories.agents.create({
       id: "agent-1",
@@ -139,8 +161,23 @@ describe("authenticated dashboard read APIs", () => {
       queuedRunsCount: 0,
       pendingApprovalsCount: 1,
     });
-    expect(records).toHaveLength(1);
-    expect(records[0]).toMatchObject({ id: "provider-1", status: "ready" });
+    expect(records).toHaveLength(2);
+    const deepseek = records.find((record) => record.id === "provider-1");
+    const codex = records.find((record) => record.id === "provider-2");
+    expect(deepseek).toMatchObject({ id: "provider-1", kind: "deepseek", status: "ready", connection: null });
+    expect(codex).toMatchObject({
+      id: "provider-2",
+      kind: "codex",
+      status: "unavailable",
+      connection: {
+        state: "unsupported",
+        reason: "auth_status_unverified",
+        checkedAt: "2026-10-20T00:00:00.000Z",
+      },
+    });
+    expect(codex).not.toHaveProperty("secretReference");
+    expect(codex).not.toHaveProperty("bindingId");
+    expect(codex).not.toHaveProperty("revision");
     expect(records[0]).not.toHaveProperty("secretReference");
     expect(JSON.stringify(records)).not.toContain("vault://private/provider-key");
   });
