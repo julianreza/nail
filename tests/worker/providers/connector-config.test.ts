@@ -65,6 +65,12 @@ describe("subscription connector configuration", () => {
     })]);
   });
 
+  it("keeps a securely configured but uninstalled official CLI available for diagnostics", () => {
+    const missingCli = fixture();
+    rmSync(missingCli.executable);
+    expect(missingCli.config().bindings[0]?.executable).toBe(missingCli.executable);
+  });
+
   it("requires both startup-only environment paths", () => {
     const { environment } = fixture();
     expect(() => loadConnectorConfig({}, { applicationRoot: "/app" }))

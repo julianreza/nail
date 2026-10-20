@@ -83,7 +83,7 @@ function pathsOverlap(first: string, second: string): boolean {
   return pathInside(first, second) || pathInside(second, first);
 }
 
-function assertOwned(path: string, maximumMode: number, requireDirectory: boolean): void {
+function assertOwned(path: string, maximumMode: number, requireDirectory: boolean, allowRootOwner = false): void {
   let stat;
   try {
     stat = lstatSync(path);
@@ -92,7 +92,7 @@ function assertOwned(path: string, maximumMode: number, requireDirectory: boolea
   }
   if (stat.isSymbolicLink() || (requireDirectory ? !stat.isDirectory() : !stat.isFile())) return invalid();
   const uid = process.getuid?.();
-  if (uid !== undefined && stat.uid !== uid) return invalid();
+  if (uid !== undefined && stat.uid !== uid && !(allowRootOwner && stat.uid === 0)) return invalid();
   if ((stat.mode & maximumMode) !== 0) return invalid();
 }
 
@@ -137,12 +137,38 @@ function readBindings(path: string, forbiddenRoots: readonly string[]): Connecto
     kinds.add(kind);
 
     if (basename(item.executable) !== EXPECTED_EXECUTABLE[kind]) return invalid();
-    const executable = canonical(item.executable);
+    const executableSetting = resolve(item.executable);
+    if (executableSetting !== item.executable) return invalid();
+    let executable: string;
+    try {
+      executable = realpathSync(executableSetting);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return invalid();
+      const executableParent = dirname(executableSetting);
+      const canonicalParent = canonical(executableParent);
+      if (canonicalParent !== executableParent) return invalid();
+      assertOwned(canonicalParent, 0o022, true, true);
+      executable = executableSetting;
+    }
     if (forbiddenRoots.some((rootPath) => pathsOverlap(executable, rootPath))) return invalid();
     let executableStat;
     try {
       executableStat = statSync(executable);
-    } catch {
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        const expectedHome = join(accountsRootCanonical, item.bindingId);
+        const home = canonical(item.home);
+        if (home !== expectedHome) return invalid();
+        assertOwned(home, 0o077, true);
+        return {
+          bindingId: item.bindingId,
+          kind,
+          executable,
+          home,
+          model: item.model,
+          enabled: item.enabled,
+        };
+      }
       return invalid();
     }
     const uid = process.getuid?.();
