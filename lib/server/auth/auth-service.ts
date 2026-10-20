@@ -197,6 +197,10 @@ function sameOrigin(request: Request, appOrigin: string): boolean {
   }
 }
 
+export function isSameOriginRequest(request: Request, appOrigin: string): boolean {
+  return sameOrigin(request, appOrigin);
+}
+
 function json(body: object, status: number, headers?: HeadersInit): Response {
   const responseHeaders = new Headers(headers);
   responseHeaders.set("content-type", "application/json; charset=utf-8");

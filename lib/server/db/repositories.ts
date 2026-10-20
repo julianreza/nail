@@ -136,6 +136,28 @@ export interface CheckpointRecord {
   createdAt: string;
 }
 
+export interface QaRoundRecord {
+  id: string;
+  runId: string;
+  roundNumber: number;
+  status: "passed" | "failed";
+  details: string;
+  createdAt: string;
+}
+
+export interface RunPlanRecord {
+  runId: string;
+  planVersion: number;
+  goal: string;
+  acceptanceCriteriaJson: string;
+  setupCommandsJson: string;
+  verificationCommandsJson: string;
+  allowedToolsJson: string;
+  approvalId: string;
+  approvalFingerprint: string;
+  createdAt: string;
+}
+
 export interface UsageRecord {
   id: string;
   runId: string;
@@ -145,6 +167,7 @@ export interface UsageRecord {
   inputTokens: number;
   outputTokens: number;
   estimatedCostMicrounits: number | null;
+  usageState: "known" | "reserved" | "unknown";
   createdAt: string;
 }
 
@@ -274,6 +297,12 @@ export function createRepositories(database: DatabaseSync) {
       const { capabilitiesJson, ...provider } = record;
       return { ...provider, capabilities: JSON.parse(capabilitiesJson) as string[] };
     },
+    updateStatus(id: string, status: ProviderStatus): boolean {
+      return (
+        database.prepare("UPDATE providers SET status = ? WHERE id = ?").run(status, id)
+          .changes === 1
+      );
+    },
     list(): ProviderRecord[] {
       return listRecords<
         Omit<ProviderRecord, "capabilities"> & { capabilitiesJson: string }
@@ -367,6 +396,12 @@ export function createRepositories(database: DatabaseSync) {
     },
     list(): TaskRecord[] {
       return listRecords(database, "tasks");
+    },
+    listForRun(runId: string): TaskRecord[] {
+      return database
+        .prepare("SELECT * FROM tasks WHERE run_id = ? ORDER BY position ASC, id ASC")
+        .all(runId)
+        .map((row) => mapRow<TaskRecord>(row));
     },
   };
 
@@ -673,6 +708,52 @@ export function createRepositories(database: DatabaseSync) {
     },
   };
 
+  const runPlans = {
+    create(input: Omit<RunPlanRecord, "createdAt">): RunPlanRecord {
+      database
+        .prepare(
+          `INSERT INTO run_plans (
+             run_id, plan_version, goal, acceptance_criteria_json, setup_commands_json,
+             verification_commands_json, allowed_tools_json, approval_id, approval_fingerprint
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          input.runId,
+          input.planVersion,
+          input.goal,
+          input.acceptanceCriteriaJson,
+          input.setupCommandsJson,
+          input.verificationCommandsJson,
+          input.allowedToolsJson,
+          input.approvalId,
+          input.approvalFingerprint,
+        );
+      return this.getByRunId(input.runId)!;
+    },
+    getByRunId(runId: string): RunPlanRecord | null {
+      const row = database.prepare("SELECT * FROM run_plans WHERE run_id = ?").get(runId);
+      return row === undefined ? null : mapRow<RunPlanRecord>(row);
+    },
+  };
+
+  const qaRounds = {
+    create(input: Omit<QaRoundRecord, "createdAt">): QaRoundRecord {
+      database
+        .prepare(
+          `INSERT INTO qa_rounds (id, run_id, round_number, status, details)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run(input.id, input.runId, input.roundNumber, input.status, input.details);
+      return findById<QaRoundRecord>(database, "qa_rounds", input.id)!;
+    },
+    listForRun(runId: string): QaRoundRecord[] {
+      return database
+        .prepare("SELECT * FROM qa_rounds WHERE run_id = ? ORDER BY round_number ASC")
+        .all(runId)
+        .map((row) => mapRow<QaRoundRecord>(row));
+    },
+  };
+
   const usageRecords = {
     create(input: {
       id: string;
@@ -683,13 +764,14 @@ export function createRepositories(database: DatabaseSync) {
       inputTokens?: number;
       outputTokens?: number;
       estimatedCostMicrounits?: number | null;
+      usageState?: UsageRecord["usageState"];
     }): UsageRecord {
       database
         .prepare(
           `INSERT INTO usage_records (
              id, run_id, provider_id, request_count, tool_call_count,
-             input_tokens, output_tokens, estimated_cost_microunits
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+             input_tokens, output_tokens, estimated_cost_microunits, usage_state
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           input.id,
@@ -700,6 +782,7 @@ export function createRepositories(database: DatabaseSync) {
           input.inputTokens ?? 0,
           input.outputTokens ?? 0,
           input.estimatedCostMicrounits ?? null,
+          input.usageState ?? "known",
         );
       return findById<UsageRecord>(database, "usage_records", input.id)!;
     },
@@ -726,6 +809,8 @@ export function createRepositories(database: DatabaseSync) {
     artifacts,
     workspaces,
     checkpoints,
+    runPlans,
+    qaRounds,
     usageRecords,
   };
 }

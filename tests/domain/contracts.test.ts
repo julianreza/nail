@@ -13,6 +13,11 @@ describe("run state", () => {
     expect(canTransitionRunState("running", "done")).toBe(false);
   });
 
+  it("allows failed plan generation to terminate a draft without authorizing execution", () => {
+    expect(canTransitionRunState("draft", "failed")).toBe(true);
+    expect(canTransitionRunState("draft", "running")).toBe(false);
+  });
+
   it("treats done, failed, and cancelled as terminal", () => {
     expect(isTerminalRunState("done")).toBe(true);
     expect(isTerminalRunState("failed")).toBe(true);

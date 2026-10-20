@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getDelegatedControllers, parseDockerInspectRecord } from "../../worker/sandbox/docker-cli-driver";
 import {
   SANDBOX_POLICY,
   RootlessDockerSandbox,
@@ -27,6 +28,8 @@ class FakeDockerDriver implements DockerDriver {
   createCalls: DockerContainerSpec[] = [];
   execCalls: string[] = [];
   stopped: string[] = [];
+  stopFinished: string[] = [];
+  stopDelayMs = 0;
   running = false;
   inspected?: DockerContainerSpec;
   onExec?: () => void;
@@ -71,10 +74,30 @@ class FakeDockerDriver implements DockerDriver {
   async stop(containerId: string): Promise<void> {
     this.stopped.push(containerId);
     this.running = false;
+    if (this.stopDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.stopDelayMs));
+    }
+    this.stopFinished.push(containerId);
   }
 }
 
 describe("fail-closed rootless sandbox", () => {
+  it("parses the single object emitted by Docker inspect format templates", () => {
+    expect(parseDockerInspectRecord({ HostConfig: { NetworkMode: "none" } })).toMatchObject({
+      HostConfig: { NetworkMode: "none" },
+    });
+    expect(parseDockerInspectRecord([{ State: { Running: true } }])).toMatchObject({
+      State: { Running: true },
+    });
+  });
+
+  it("requires delegated CPU, memory, and PID controllers", () => {
+    expect(
+      getDelegatedControllers("yes", ["cpu", "memory", "pids", "io"]),
+    ).toEqual(["cpu", "memory", "pids"]);
+    expect(getDelegatedControllers("no", ["cpu", "memory", "pids"])).toEqual([]);
+  });
+
   it("refuses to start without rootless cgroup v2 and never falls back to host execution", async () => {
     const driver = new FakeDockerDriver();
     driver.host = {
@@ -134,6 +157,7 @@ describe("fail-closed rootless sandbox", () => {
 
   it("executes only an exactly approved command and stops the whole container on cancellation", async () => {
     const driver = new FakeDockerDriver();
+    driver.stopDelayMs = 30;
     const sandbox = new RootlessDockerSandbox(driver, { probeImage: "trusted-probe:1" });
     const handle = await sandbox.start({
       runId: "run-1",
@@ -158,6 +182,7 @@ describe("fail-closed rootless sandbox", () => {
     await expect(execution).rejects.toThrow();
     expect(driver.execCalls).toEqual(["bun run test"]);
     expect(driver.stopped).toEqual(["container-1"]);
+    expect(driver.stopFinished).toEqual(["container-1"]);
   });
 
   it("does not start an approved command when cancellation was already requested", async () => {

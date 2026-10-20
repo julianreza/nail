@@ -20,7 +20,7 @@ const TERMINAL_RUN_STATES: ReadonlySet<RunState> = new Set([
 ]);
 
 const RUN_STATE_TRANSITIONS: Record<RunState, readonly RunState[]> = {
-  draft: ["awaiting_approval", "cancelled"],
+  draft: ["awaiting_approval", "cancelled", "failed"],
   awaiting_approval: ["draft", "queued", "blocked", "cancelled"],
   queued: ["running", "blocked", "cancelled"],
   running: [

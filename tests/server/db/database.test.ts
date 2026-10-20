@@ -38,14 +38,22 @@ describe("SQLite persistence", () => {
         db.prepare(
           "SELECT version FROM schema_migrations ORDER BY version",
         ).all(),
-      ).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }]);
+      ).toEqual([
+        { version: 1 },
+        { version: 2 },
+        { version: 3 },
+        { version: 4 },
+        { version: 5 },
+        { version: 6 },
+        { version: 7 },
+      ]);
       expect(
         db
           .prepare(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('projects', 'agents', 'providers', 'conversations', 'runs', 'tasks', 'task_dependencies', 'approvals', 'leases', 'events', 'qa_results', 'artifacts', 'usage_records', 'run_workspaces', 'checkpoints') ORDER BY name",
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('projects', 'agents', 'providers', 'conversations', 'runs', 'tasks', 'task_dependencies', 'approvals', 'leases', 'events', 'qa_results', 'artifacts', 'usage_records', 'run_workspaces', 'checkpoints', 'run_usage_budgets', 'run_plans', 'qa_rounds') ORDER BY name",
           )
           .all(),
-      ).toHaveLength(15);
+      ).toHaveLength(18);
     } finally {
       db.close();
     }

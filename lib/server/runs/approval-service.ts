@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { canTransitionRunState, type RunState } from "../../domain/run-state";
-import { createRepositories } from "../db/repositories";
+import { createRepositories, type ApprovalRecord } from "../db/repositories";
 import { withTransaction } from "../db/database";
 
 export interface ApprovalScope {
@@ -153,7 +153,11 @@ export function createApprovalService(
     }
   }
 
-  function submitForApproval(runId: string, input: ApprovalScope) {
+  function submitForApproval(
+    runId: string,
+    input: ApprovalScope,
+    onSubmitted?: (approval: ApprovalRecord) => void,
+  ) {
     const scope = normalizeScope(input, allowedPermissions);
     const scopeJson = serializeScope(scope);
     const fingerprint = fingerprintScope(scopeJson);
@@ -177,7 +181,10 @@ export function createApprovalService(
           approval.planVersion === scope.planVersion &&
           approval.payloadFingerprint === fingerprint,
       );
-      if (samePending) return samePending.id;
+      if (samePending) {
+        onSubmitted?.(samePending);
+        return samePending.id;
+      }
 
       const sameVersionWithChangedScope = existing.some(
         (approval) =>
@@ -190,7 +197,7 @@ export function createApprovalService(
       }
 
       const id = randomUUID();
-      repositories.approvals.create({
+      const createdApproval = repositories.approvals.create({
         id,
         runId,
         payloadFingerprint: fingerprint,
@@ -220,6 +227,7 @@ export function createApprovalService(
           baselineCommit: scope.baselineCommit,
         },
       });
+      onSubmitted?.(createdApproval);
       return id;
     });
 
