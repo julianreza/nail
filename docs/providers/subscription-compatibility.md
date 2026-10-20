@@ -60,6 +60,12 @@ The official Code and Platform documentation requests returned HTTP 403 during t
 
 **Plan gate:** `connectionSupported=false` and `completionSupported=false` until official docs and terms for the specific Claude subscription use case are confirmed and tested. The connector must not infer support from an Anthropic API key, Console/Bedrock/Vertex mode, `setup-token`, or an OAuth token reused against an API endpoint. If the gate remains unresolved, show Claude as unavailable with `policy_unverified`; do not implement a functional subscription adapter.
 
+## Host isolation probe
+
+- `bwrap`, rootless Docker, `unshare`, and `nft` are present on this host; Docker reports rootless mode and cgroup v2.
+- A synthetic `bwrap --unshare-user --unshare-pid --ro-bind / / --tmpfs /home --tmpfs /root --tmpfs /run --proc /proc --dev /dev --tmpfs /tmp ...` canary passed: the synthetic dedicated account marker was readable, the project under `/home/ubuntu/Project/nail` was not visible, and `/etc` was not writable. No real account home or credential was mounted.
+- This proves only a generic read-only filesystem boundary. The canary did **not** validate any vendor CLI, disable its tools/MCP/plugins/hooks, constrain outbound network, or enforce a model token budget. No verified isolation profile is enabled.
+
 ## Binding readiness criteria
 
 A binding can be `connected` only after official CLI auth status confirms the required subscription mode under its dedicated administrator-controlled home. It can be `ready` only after all of the following are proven on the target host:
