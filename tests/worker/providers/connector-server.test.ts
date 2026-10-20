@@ -140,6 +140,29 @@ describe("private subscription connector socket", () => {
     }
   });
 
+  it("cancels an active connection check before it can return a stale diagnostic", async () => {
+    const { config, binding } = setup();
+    let startedResolve: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { startedResolve = resolve; });
+    const adapter = fakeConnector({
+      check: async (_bindingId, signal) => new Promise((resolve, reject) => {
+        startedResolve?.();
+        signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
+      }),
+    });
+    const server = await startSubscriptionConnectorServer({ config, adapters: { codex: adapter } });
+    const client = createSubscriptionConnectorClient(config.socketPath);
+    try {
+      const check = client.check(binding.bindingId, new AbortController().signal);
+      const checkRejected = expect(check).rejects.toMatchObject({ code: "cancelled" });
+      await started;
+      await client.cancel(binding.bindingId, new AbortController().signal);
+      await checkRejected;
+    } finally {
+      await server.close();
+    }
+  });
+
   it("rejects unknown and oversized protocol requests with bounded responses", async () => {
     const { config } = setup();
     const server = await startSubscriptionConnectorServer({ config, adapters: { codex: fakeConnector() } });

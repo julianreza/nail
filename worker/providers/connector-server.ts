@@ -33,7 +33,7 @@ interface WireRequest {
 
 interface ActiveInvocation {
   controller: AbortController;
-  promise: Promise<SubscriptionCompletion>;
+  promise: Promise<unknown>;
 }
 
 export interface StartSubscriptionConnectorOptions {
@@ -282,7 +282,15 @@ async function dispatchRequest(
   const adapter = adapters.get(binding.kind);
   if (!adapter) throw new SubscriptionProviderError("not_installed");
 
-  if (request.op === "check") return validateDiagnostic(await adapter.check(binding.bindingId, signal), binding);
+  if (request.op === "check") {
+    const diagnostic = await runBoundInvocation(
+      binding.bindingId,
+      signal,
+      active,
+      (invocationSignal) => adapter.check(binding.bindingId, invocationSignal),
+    );
+    return validateDiagnostic(diagnostic as ConnectionDiagnostic, binding);
+  }
   if (request.op === "cancel") {
     const running = active.get(binding.bindingId);
     if (running) {
@@ -292,26 +300,44 @@ async function dispatchRequest(
     return null;
   }
   if (request.model !== binding.model) throw new SubscriptionProviderError("invalid_model");
-  if (active.has(binding.bindingId)) throw new SubscriptionProviderError("busy");
+  const completion = await runBoundInvocation(
+    binding.bindingId,
+    signal,
+    active,
+    (invocationSignal) => adapter.complete({
+      bindingId: binding.bindingId,
+      prompt: request.prompt!,
+      model: request.model!,
+      maxOutputTokens: request.maxOutputTokens!,
+    }, invocationSignal),
+  );
+  return validateCompletion(completion as SubscriptionCompletion, binding);
+}
 
+async function runBoundInvocation<T>(
+  bindingId: string,
+  callerSignal: AbortSignal,
+  active: Map<string, ActiveInvocation>,
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  if (callerSignal.aborted) throw new SubscriptionProviderError("cancelled");
+  if (active.has(bindingId)) throw new SubscriptionProviderError("busy");
   const controller = new AbortController();
-  const abortFromCaller = () => controller.abort(signal.reason);
-  signal.addEventListener("abort", abortFromCaller, { once: true });
-  const promise = Promise.resolve().then(() => adapter.complete({
-    bindingId: binding.bindingId,
-    prompt: request.prompt!,
-    model: request.model!,
-    maxOutputTokens: request.maxOutputTokens!,
-  }, controller.signal));
-  const invocation = { controller, promise };
-  active.set(binding.bindingId, invocation);
+  const abortFromCaller = () => controller.abort(callerSignal.reason);
+  callerSignal.addEventListener("abort", abortFromCaller, { once: true });
+  const promise = Promise.resolve().then(() => {
+    if (controller.signal.aborted) throw new SubscriptionProviderError("cancelled");
+    return operation(controller.signal);
+  });
+  const invocation: ActiveInvocation = { controller, promise };
+  active.set(bindingId, invocation);
   try {
-    return validateCompletion(await promise, binding);
+    return await promise;
   } catch (error) {
     if (controller.signal.aborted) throw new SubscriptionProviderError("cancelled");
     throw error;
   } finally {
-    signal.removeEventListener("abort", abortFromCaller);
-    if (active.get(binding.bindingId) === invocation) active.delete(binding.bindingId);
+    callerSignal.removeEventListener("abort", abortFromCaller);
+    if (active.get(bindingId) === invocation) active.delete(bindingId);
   }
 }
