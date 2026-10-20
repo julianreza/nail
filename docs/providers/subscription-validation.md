@@ -2,13 +2,13 @@
 
 **Workspace:** `feature/provider-setup` at `/home/ubuntu/Project/nail/.worktrees/provider-setup`
 **Validation date:** 2026-10-20
-**Last checked commit:** `0b6c502 docs: document subscription account operations and smoke tests`
+**Last checked commit:** `cbcf172 fix: cancel active subscription connection checks`
 
 ## Automated results
 
 | Check | Result |
 |---|---|
-| Vitest full suite (`../../node_modules/.bin/vitest run`) | Passed: 35 files, 140 tests |
+| Vitest full suite (`../../node_modules/.bin/vitest run`) | Passed: 35 files, 141 tests |
 | ESLint (`node /home/ubuntu/Project/nail/node_modules/eslint/bin/eslint.js .`) | Passed: no warnings or errors |
 | Production build, Webpack (`next build --webpack`) | Passed, including Next.js TypeScript validation and static page generation |
 | Production build, default Turbopack (`next build`) | Blocked: worktree resolves dependencies through a symlink outside the Turbopack filesystem root; Next could not find `next/package.json` within the worktree root |
