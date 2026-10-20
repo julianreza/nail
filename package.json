@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "providers:connector": "bun run worker/providers/connector-daemon.ts"
   },
   "dependencies": {
     "next": "16.4.2",
