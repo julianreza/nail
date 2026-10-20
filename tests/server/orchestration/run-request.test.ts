@@ -21,6 +21,7 @@ function createDatabase() {
   repos.providers.create({
     id: "deepseek-1",
     name: "DeepSeek",
+    kind: "deepseek",
     status: "ready",
     model: "deepseek-chat",
     authMode: "api_key",
@@ -104,6 +105,32 @@ describe("requesting an approved PM plan", () => {
         allowedTools,
         maxOutputTokens: 4000,
       });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("accepts a ready subscription provider without requiring or reading an API-key secret", async () => {
+    const { database, repos } = createDatabase();
+    const subscription = repos.providers.create({
+      id: "codex-1",
+      name: "Renamed account label",
+      kind: "codex",
+      status: "ready",
+      model: "gpt-codex-model",
+      authMode: "subscription_cli",
+    });
+    repos.accountBindings.create({ providerId: subscription.id, bindingId: "codex-owner", state: "ready" });
+    try {
+      const result = await createRunPlanFromGoal(
+        database,
+        { ...request, providerId: subscription.id },
+        policy,
+        async () => generatedPlan,
+      );
+      expect(repos.runs.getById(result.runId)?.state).toBe("awaiting_approval");
+      expect(repos.usageRecords.list().every((usage) => usage.providerId === subscription.id)).toBe(true);
+      expect(repos.providers.getById(subscription.id)?.secretReference).toBeNull();
     } finally {
       database.close();
     }

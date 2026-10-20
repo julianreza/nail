@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { SUBSCRIPTION_PROVIDER_KINDS } from "../../domain/subscription-provider";
 import { createRepositories } from "../db/repositories";
 import { configureRunUsageBudget } from "../providers/usage-budget";
 import { createApprovalService } from "../runs/approval-service";
@@ -22,7 +23,7 @@ export interface PlanGeneratorInput {
   providerId: string;
   goal: string;
   baselineCommit: string | null;
-  agents: Array<{ id: string; name: string; role: string }>;
+  agents: Array<{ id: string; role: string }>;
   allowedTools: readonly string[];
   maxOutputTokens: number;
 }
@@ -83,14 +84,16 @@ export async function createRunPlanFromGoal(
   const project = repositories.projects.getById(input.projectId);
   if (!project) throw new Error("Project does not exist");
   const provider = repositories.providers.getById(input.providerId);
-  if (
-    !provider ||
-    provider.name.toLowerCase() !== "deepseek" ||
-    provider.status !== "ready" ||
-    provider.authMode !== "api_key" ||
-    !provider.secretReference
-  ) {
-    throw new Error("A ready API-key DeepSeek provider is required to generate a plan");
+  const deepSeekReady = provider?.kind === "deepseek" &&
+    provider.status === "ready" && provider.authMode === "api_key" &&
+    provider.secretReference !== null && provider.model !== null;
+  const subscriptionReady = provider?.kind !== null && provider?.kind !== "deepseek" &&
+    provider?.kind !== undefined && SUBSCRIPTION_PROVIDER_KINDS.includes(provider.kind) &&
+    provider.status === "ready" && provider.authMode === "subscription_cli" &&
+    provider.secretReference === null && provider.model !== null &&
+    repositories.accountBindings.getByProviderId(provider.id)?.state === "ready";
+  if (!provider || (!deepSeekReady && !subscriptionReady)) {
+    throw new Error("A ready provider with a verified authentication mode is required to generate a plan");
   }
   if (input.setupCommands.some((command) => command.trim().length === 0) ||
       input.verificationCommands.some((command) => command.trim().length === 0)) {
@@ -136,7 +139,7 @@ export async function createRunPlanFromGoal(
       agents: repositories.agents
         .list()
         .filter((agent) => agent.projectId === null || agent.projectId === project.id)
-        .map(({ id, name, role }) => ({ id, name, role })),
+        .map(({ id, role }) => ({ id, role })),
       allowedTools: context.allowedTools,
       maxOutputTokens: input.maxOutputTokens,
     });

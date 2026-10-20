@@ -10,6 +10,7 @@ export interface ProviderRegistryDependencies {
   database: DatabaseSync;
   connector: SubscriptionConnector;
   secretStore?: EncryptedSecretStore;
+  getSecretStore?: () => EncryptedSecretStore;
   fetcher?: typeof fetch;
 }
 
@@ -19,6 +20,10 @@ export interface CompleteProviderTextRequest {
   prompt: string;
   maxOutputTokens: number;
   signal: AbortSignal;
+}
+
+export interface ProviderRegistry {
+  completeText(input: CompleteProviderTextRequest): Promise<SubscriptionCompletion>;
 }
 
 function normalizeDeepSeekResult(
@@ -42,19 +47,20 @@ function normalizeDeepSeekResult(
   };
 }
 
-export function createProviderRegistry(dependencies: ProviderRegistryDependencies) {
+export function createProviderRegistry(dependencies: ProviderRegistryDependencies): ProviderRegistry {
   return {
     async completeText(input: CompleteProviderTextRequest): Promise<SubscriptionCompletion> {
       const provider = createRepositories(dependencies.database).providers.getById(input.providerId);
       if (!provider) throw new SubscriptionProviderError("invalid_binding");
       if (provider.kind === "deepseek" && provider.authMode === "api_key") {
-        if (!dependencies.secretStore) throw new ProviderConfigurationError();
+        const secretStore = dependencies.secretStore ?? dependencies.getSecretStore?.();
+        if (!secretStore) throw new ProviderConfigurationError();
         if (!provider.model || provider.status !== "ready" || !provider.secretReference) {
           throw new ProviderUnavailableError();
         }
         const adapter = new DeepSeekAdapter({
           database: dependencies.database,
-          secretStore: dependencies.secretStore,
+          secretStore,
           fetcher: dependencies.fetcher,
         });
         const result = await adapter.complete({
