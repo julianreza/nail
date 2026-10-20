@@ -18,6 +18,7 @@ export interface DeepSeekMessage {
   content: string | null;
   name?: string;
   tool_call_id?: string;
+  tool_calls?: DeepSeekToolCall[];
 }
 
 export interface DeepSeekTool {

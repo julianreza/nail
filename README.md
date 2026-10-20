@@ -41,11 +41,13 @@ Server data uses the built-in `node:sqlite` driver, verified with Bun 1.4.3 and 
 
 ## Sandbox status
 
-The sandbox adapter accepts only an already-approved command list and uses a local rootless Docker daemon with cgroup v2 CPU, memory, and PID controls, network `none`, a non-root UID, a read-only baseline, and no secret/control-plane mounts. Defaults are 1 CPU, 768 MiB RAM, 128 PIDs, and a 15-minute command timeout. Any missing or ineffective control disables sandbox start. The adapter is not wired into the worker yet, and the target VPS has not been validated; do not treat agent execution as production-ready.
+The sandbox adapter accepts only an already-approved command list and uses a local rootless Docker daemon with cgroup v2 CPU, memory, and PID controls, network `none`, a non-root UID, a read-only baseline, and no secret/control-plane mounts. Defaults are 1 CPU, 768 MiB RAM, 128 PIDs, and a 15-minute command timeout. Any missing or ineffective control disables sandbox start. `createSandboxTaskExecutor` bridges the worker callback to provider tool calls and sandbox execution, with per-step approval/lease checks and awaited teardown. This callback is not launched automatically by the web app; target VPS validation is still outstanding.
 
 ## Orchestration implementation status
 
-Project detail pages read stored plans, task dependencies, QA rounds, and pending approvals. Approval mutations require an owner session, an exact same-origin request, and the reviewed payload fingerprint. Domain services validate plans and serialize task starts; QA tests exercise repair routing and completion gates using fixtures. These are foundations, not a working autonomous PM/engineer/QA pipeline: the model/tool loop, provider-to-worker wiring, sandbox execution integration, real verification evidence, and final patch delivery remain unfinished. Do not treat passing fixture tests as evidence that agents executed or tested project code.
+Project detail pages read stored plans, task dependencies, QA rounds, and pending approvals. Approval mutations require an owner session, an exact same-origin request, and the reviewed payload fingerprint. Domain services validate plans and serialize task starts. The bounded task loop supports only exact approved `run_command` calls; it records command results, rejects duplicate call IDs, checks the global lease before each step, and never marks a run verified based on a model summary. Any non-zero sandbox command blocks its task even if the model claims success. The executor saves checkpoints and returns `awaiting_review`, not `done`. PM lease scheduling, live provider setup, automatic QA backed by trusted evidence, full file-editing tools, and final patch delivery remain unfinished.
+
+Run `NAIL_LIVE_SANDBOX=1 bun run test -- tests/sandbox/tool-loop-live.test.ts` to opt into the real rootless Docker integration test using the already-installed local `alpine:3.20` image (override with `NAIL_SANDBOX_PROBE_IMAGE`). It does not pull images or contact an AI provider; only its model replies are fixtures. Without opt-in, this test is skipped.
 
 ## Learn More
 
