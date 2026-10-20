@@ -46,14 +46,15 @@ describe("SQLite persistence", () => {
         { version: 5 },
         { version: 6 },
         { version: 7 },
+        { version: 8 },
       ]);
       expect(
         db
           .prepare(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('projects', 'agents', 'providers', 'conversations', 'runs', 'tasks', 'task_dependencies', 'approvals', 'leases', 'events', 'qa_results', 'artifacts', 'usage_records', 'run_workspaces', 'checkpoints', 'run_usage_budgets', 'run_plans', 'qa_rounds') ORDER BY name",
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('projects', 'agents', 'providers', 'conversations', 'runs', 'tasks', 'task_dependencies', 'approvals', 'leases', 'events', 'qa_results', 'artifacts', 'usage_records', 'run_workspaces', 'checkpoints', 'run_usage_budgets', 'run_plans', 'qa_rounds', 'provider_account_bindings') ORDER BY name",
           )
           .all(),
-      ).toHaveLength(18);
+      ).toHaveLength(19);
     } finally {
       db.close();
     }

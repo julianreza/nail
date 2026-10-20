@@ -235,6 +235,34 @@ const migrations: readonly Migration[] = [
       CREATE INDEX qa_rounds_run_number_idx ON qa_rounds(run_id, round_number);
     `,
   },
+  {
+    version: 8,
+    name: "subscription_provider_bindings",
+    sql: `
+      ALTER TABLE providers
+      ADD COLUMN kind TEXT CHECK (kind IS NULL OR kind IN ('deepseek', 'antigravity', 'codex', 'claude'));
+      UPDATE providers
+      SET kind = 'deepseek'
+      WHERE lower(name) = 'deepseek' AND auth_mode = 'api_key';
+      CREATE UNIQUE INDEX subscription_provider_kind_unique
+      ON providers(kind)
+      WHERE auth_mode = 'subscription_cli' AND kind IS NOT NULL;
+      CREATE TABLE provider_account_bindings (
+        provider_id TEXT PRIMARY KEY REFERENCES providers(id) ON DELETE CASCADE,
+        binding_id TEXT NOT NULL UNIQUE
+          CHECK (length(binding_id) BETWEEN 1 AND 64)
+          CHECK (binding_id NOT GLOB '*[^a-z0-9_-]*')
+          CHECK (substr(binding_id, 1, 1) GLOB '[a-z0-9]'),
+        state TEXT NOT NULL CHECK (state IN (
+          'not_installed', 'needs_login', 'connected', 'ready',
+          'rate_limited', 'unavailable', 'unsupported'
+        )),
+        reason TEXT CHECK (reason IS NULL OR length(reason) <= 256),
+        checked_at TEXT CHECK (checked_at IS NULL OR length(checked_at) <= 64),
+        revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0)
+      );
+    `,
+  },
 ];
 
 export function migrateDatabase(database: DatabaseSync): void {

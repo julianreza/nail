@@ -130,6 +130,7 @@ function safeRecord(provider: ProviderRecord): SafeProviderRecord {
   return {
     id: provider.id,
     name: provider.name,
+    kind: provider.kind,
     status: provider.status,
     model: provider.model,
     authMode: provider.authMode,
@@ -161,6 +162,7 @@ export async function createDeepSeekProviderSetup(
       const provider = repositories.providers.create({
         id: randomUUID(),
         name: "DeepSeek",
+        kind: "deepseek",
         status: "ready",
         model: input.model,
         authMode: "api_key",

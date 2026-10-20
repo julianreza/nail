@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { ProviderStatus } from "../../domain/provider-status";
+import type { ConnectionState, SubscriptionProviderKind } from "../../domain/subscription-provider";
 import type { RunState } from "../../domain/run-state";
 import type { VerificationStatus } from "../../domain/verification-result";
 
@@ -24,15 +25,27 @@ export interface AgentRecord {
 
 export type ProviderAuthMode = "api_key" | "subscription_cli" | "none";
 
+export type ProviderKind = "deepseek" | SubscriptionProviderKind;
+
 export interface ProviderRecord {
   id: string;
   name: string;
+  kind: ProviderKind | null;
   status: ProviderStatus;
   model: string | null;
   authMode: ProviderAuthMode;
   secretReference: string | null;
   capabilities: string[];
   createdAt: string;
+}
+
+export interface ProviderAccountBindingRecord {
+  providerId: string;
+  bindingId: string;
+  state: ConnectionState;
+  reason: string | null;
+  checkedAt: string | null;
+  revision: number;
 }
 
 export interface ConversationRecord {
@@ -265,24 +278,31 @@ export function createRepositories(database: DatabaseSync) {
     create(input: {
       id: string;
       name: string;
+      kind?: ProviderKind | null;
       status: ProviderStatus;
       model?: string | null;
       authMode: ProviderAuthMode;
       secretReference?: string | null;
       capabilities?: string[];
     }): ProviderRecord {
+      const kind = input.kind ?? null;
+      const secretReference = input.secretReference ?? null;
+      if (input.authMode === "subscription_cli" && (!kind || secretReference !== null)) {
+        throw new Error("Subscription providers require a kind and must not store a secret reference");
+      }
       database
         .prepare(
-          `INSERT INTO providers (id, name, status, model, auth_mode, secret_reference, capabilities_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO providers (id, name, kind, status, model, auth_mode, secret_reference, capabilities_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           input.id,
           input.name,
+          kind,
           input.status,
           input.model ?? null,
           input.authMode,
-          input.secretReference ?? null,
+          secretReference,
           JSON.stringify(input.capabilities ?? []),
         );
       return this.getById(input.id)!;
@@ -310,6 +330,74 @@ export function createRepositories(database: DatabaseSync) {
         ...provider,
         capabilities: JSON.parse(capabilitiesJson) as string[],
       }));
+    },
+  };
+
+  const accountBindings = {
+    create(input: {
+      providerId: string;
+      bindingId: string;
+      state: ConnectionState;
+    }): ProviderAccountBindingRecord {
+      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(input.bindingId)) {
+        throw new Error("Provider binding ID is invalid");
+      }
+      const provider = providers.getById(input.providerId);
+      if (
+        !provider ||
+        provider.authMode !== "subscription_cli" ||
+        provider.kind === null ||
+        provider.kind === "deepseek" ||
+        provider.secretReference !== null
+      ) {
+        throw new Error("Subscription binding requires a secret-free subscription provider");
+      }
+      database.prepare(
+        `INSERT INTO provider_account_bindings (provider_id, binding_id, state)
+         VALUES (?, ?, ?)`,
+      ).run(input.providerId, input.bindingId, input.state);
+      return this.getByProviderId(input.providerId)!;
+    },
+    getByProviderId(providerId: string): ProviderAccountBindingRecord | null {
+      const row = database.prepare(
+        `SELECT provider_id AS providerId, binding_id AS bindingId, state,
+                reason, checked_at AS checkedAt, revision
+         FROM provider_account_bindings WHERE provider_id = ?`,
+      ).get(providerId);
+      return row === undefined ? null : mapRow<ProviderAccountBindingRecord>(row);
+    },
+    updateDiagnostic(input: {
+      providerId: string;
+      bindingId: string;
+      expectedRevision: number;
+      state: ConnectionState;
+      reason: string | null;
+      checkedAt: string;
+    }): boolean {
+      if (
+        !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0 ||
+        (input.reason !== null && input.reason.length > 256) ||
+        input.checkedAt.length > 64
+      ) {
+        throw new Error("Provider binding diagnostic is invalid");
+      }
+      return database.prepare(
+        `UPDATE provider_account_bindings
+         SET state = ?, reason = ?, checked_at = ?, revision = revision + 1
+         WHERE provider_id = ? AND binding_id = ? AND revision = ?`,
+      ).run(
+        input.state,
+        input.reason,
+        input.checkedAt,
+        input.providerId,
+        input.bindingId,
+        input.expectedRevision,
+      ).changes === 1;
+    },
+    delete(providerId: string): boolean {
+      return database.prepare(
+        "DELETE FROM provider_account_bindings WHERE provider_id = ?",
+      ).run(providerId).changes === 1;
     },
   };
 
@@ -798,6 +886,7 @@ export function createRepositories(database: DatabaseSync) {
     projects,
     agents,
     providers,
+    accountBindings,
     conversations,
     runs,
     tasks,
