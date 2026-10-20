@@ -2,7 +2,7 @@
 
 **Workspace:** `feature/provider-setup` at `/home/ubuntu/Project/nail/.worktrees/provider-setup`
 **Validation date:** 2026-10-20
-**Last checked commit:** `cbcf172 fix: cancel active subscription connection checks`
+**Last checked commit:** `cbb2c1b docs: refresh subscription validation results`
 
 ## Automated results
 
