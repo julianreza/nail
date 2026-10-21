@@ -15,4 +15,19 @@ describe("dashboard agent studio", () => {
     expect(html).not.toMatch(/online|sedang bekerja|live feed/i);
     if (agentsCount === 0) expect(html).toContain("Belum ada agent tersimpan.");
   });
+
+  it("renders a shared decorative room with three distinct role tones", () => {
+    const html = renderToStaticMarkup(createElement(DashboardAgentStudio, { agentsCount: 0 }));
+    expect(html).toContain('data-agent-room="true"');
+    expect(html).toContain('aria-label="Jeda animasi"');
+    expect(html).toContain('aria-pressed="false"');
+    expect(html).toContain('data-motion="paused"');
+    expect(html.match(/class="agent-room-actor"/g)).toHaveLength(3);
+    for (const tone of ["lime", "violet", "coral"]) {
+      expect(html).toContain(`data-tone="${tone}"`);
+    }
+    const ids = [...html.matchAll(/\\sid="([^"]+)"/g)].map((match) => match[1]);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(html).toContain('aria-hidden="true"');
+  });
 });
