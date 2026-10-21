@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import MascotIllustration from "./mascot-illustration";
+import { observeRoomMotion } from "./agent-room-motion";
 
 const roles = [
   { id: "pm", name: "PM", tone: "lime", copy: "Memecah ide menjadi langkah yang jelas." },
@@ -12,8 +13,14 @@ const roles = [
 
 export default function DashboardAgentStudio({ agentsCount }: { agentsCount: number }) {
   const [paused, setPaused] = useState(false);
-  const available = false;
-  const reduced = false;
+  const roomRef = useRef<HTMLDivElement>(null);
+  const [{ available, reduced }, setMotion] = useState({ available: false, reduced: false });
+  useEffect(() => {
+    const room = roomRef.current;
+    if (!room) return;
+    return observeRoomMotion(room, setMotion);
+  }, []);
+
   return (
     <section className="agent-studio" aria-labelledby="agent-studio-title">
       <div className="command-panel-heading">
@@ -24,7 +31,7 @@ export default function DashboardAgentStudio({ agentsCount }: { agentsCount: num
         <span className="agent-studio-count">{new Intl.NumberFormat("id-ID").format(agentsCount)} agent tersimpan</span>
       </div>
       <p className="command-caption">Ilustrasi peran, bukan status agent aktif.</p>
-      <div className="agent-room" data-agent-room="true" data-motion={available && !paused ? "running" : "paused"}>
+      <div ref={roomRef} className="agent-room" data-agent-room="true" data-motion={available && !paused ? "running" : "paused"}>
         <div className="agent-room-scenery" aria-hidden="true">
           <span className="agent-room-wall-left" />
           <span className="agent-room-wall-right" />
