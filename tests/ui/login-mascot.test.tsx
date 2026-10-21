@@ -11,18 +11,21 @@ describe("login mascot", () => {
     expect(html).toContain('type="button"');
   });
 
-  it("server-renders decorative original SVG without a network asset or focus target", () => {
+  it("renders an accessible interactive mascot with original artwork and independent eye layer", () => {
     const html = renderToStaticMarkup(createElement(LoginMascot));
     expect(html).toContain("data-login-mascot");
-    expect(html).toContain('aria-hidden="true"');
+    expect(html).toContain('aria-label="Putar animasi mascot"');
+    expect(html).not.toContain('aria-hidden="true"');
     expect(html).toContain('data-monster-mascot="true"');
     expect(html).toContain('viewBox="0 0 240 200"');
-    expect(html.match(/<image /g)).toHaveLength(2);
-    expect(html).toContain('href="/branding/nail-monster-body.png"');
-    expect(html).toContain('href="/branding/nail-monster-pupil.png"');
+    expect(html.match(/<image /g)).toHaveLength(4);
+    expect(html.split('href="/branding/nail-monster-body.png"')).toHaveLength(4);
+    expect(html.split('href="/branding/nail-monster-pupil.png"')).toHaveLength(2);
+    expect(html).toContain('data-mascot-surface="antenna"');
+    expect(html).toContain('data-mascot-surface="fur"');
+    expect(html).toContain('data-mascot-surface="eyelid"');
     expect(html).toContain('clip-path="url(#nail-mascot-eye-');
     expect(html).not.toContain("<canvas");
     expect(html).not.toContain(".riv");
-    expect(html).not.toContain("tabindex");
   });
 });

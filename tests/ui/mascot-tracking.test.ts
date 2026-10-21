@@ -3,7 +3,10 @@ import { attachMascotTracking } from "../../app/login/mascot-tracking";
 
 function harness() {
   const values = new Map<string, string>();
+  const attributes = new Map<string, string>();
   const pupilValues = new Map<string, string>();
+  const antennaValues = new Map<string, string>();
+  const furValues = new Map<string, string>();
   const frames = new Map<number, FrameRequestCallback>();
   let sequence = 0;
   const fine = Object.assign(new EventTarget(), { matches: true });
@@ -17,16 +20,20 @@ function harness() {
   const element = {
     ownerDocument: doc,
     style: { setProperty: (key: string, value: string) => { values.set(key, value); } },
-    querySelector: (selector: string) => selector === ".login-mascot-pupils"
-      ? { style: { setProperty: (key: string, value: string) => { pupilValues.set(key, value); } } }
-      : null,
+    setAttribute: (key: string, value: string) => { attributes.set(key, value); },
+    querySelector: (selector: string) => {
+      if (selector === ".login-mascot-pupils") return { style: { setProperty: (key: string, value: string) => { pupilValues.set(key, value); } } };
+      if (selector === ".mascot-antenna") return { style: { setProperty: (key: string, value: string) => { antennaValues.set(key, value); } } };
+      if (selector === "[data-mascot-fur-displacement]") return { setAttribute: (key: string, value: string) => { furValues.set(key, value); } };
+      return null;
+    },
     getBoundingClientRect: () => ({ left: 100, top: 50, width: 200, height: 100 }),
   } as unknown as HTMLElement;
   const move = (x: number, y: number, pointerType = "mouse") => {
     view.dispatchEvent(Object.assign(new Event("pointermove"), { clientX: x, clientY: y, pointerType }));
   };
   const flush = () => { const batch = [...frames.values()]; frames.clear(); batch.forEach((cb) => cb(0)); };
-  return { element, values, pupilValues, frames, view, doc, fine, reduced, move, flush };
+  return { element, values, attributes, pupilValues, antennaValues, furValues, frames, view, doc, fine, reduced, move, flush };
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -35,6 +42,7 @@ describe("mascot tracking", () => {
   it("coalesces events and applies the latest bounded gaze", () => {
     const h = harness(); const cleanup = attachMascotTracking(h.element);
     h.move(100, 50); h.move(10000, 10000);
+    expect(h.attributes.get("data-mascot-idle")).toBe("false");
     expect(h.frames.size).toBe(1);
     h.flush();
     expect(h.values.get("--mascot-eye-x")).toBe("6px");
@@ -42,6 +50,8 @@ describe("mascot tracking", () => {
     expect(h.values.get("--mascot-rotate")).toBe("4deg");
     expect(h.pupilValues.get("--mascot-eye-x")).toBe("6px");
     expect(h.pupilValues.get("--mascot-eye-y")).toBe("4px");
+    expect(h.antennaValues.get("--mascot-antenna-rotate")).toBe("5deg");
+    expect(h.furValues.get("scale")).toBe("0.8");
     cleanup();
   });
   it("ignores touch, disables reduced motion, and resets on blur", () => {

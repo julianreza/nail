@@ -8,7 +8,10 @@ function harness(options: {
   reduced?: boolean;
 } = {}) {
   const values = new Map<string, string>();
+  const attributes = new Map<string, string>();
   const pupilValues = new Map<string, string>();
+  const antennaValues = new Map<string, string>();
+  const furValues = new Map<string, string>();
   const frames = new Map<number, FrameRequestCallback>();
   const media = Object.assign(new EventTarget(), { matches: options.reduced ?? false });
   const requestPermission = vi.fn(async () => options.permission ?? "granted");
@@ -28,9 +31,13 @@ function harness(options: {
   const element = {
     ownerDocument: doc,
     style: { setProperty: (key: string, value: string) => values.set(key, value) },
-    querySelector: (selector: string) => selector === ".login-mascot-pupils"
-      ? { style: { setProperty: (key: string, value: string) => { pupilValues.set(key, value); } } }
-      : null,
+    setAttribute: (key: string, value: string) => attributes.set(key, value),
+    querySelector: (selector: string) => {
+      if (selector === ".login-mascot-pupils") return { style: { setProperty: (key: string, value: string) => pupilValues.set(key, value) } };
+      if (selector === ".mascot-antenna") return { style: { setProperty: (key: string, value: string) => antennaValues.set(key, value) } };
+      if (selector === "[data-mascot-fur-displacement]") return { setAttribute: (key: string, value: string) => furValues.set(key, value) };
+      return null;
+    },
   } as unknown as HTMLElement;
   const tilt = (beta: number | null, gamma: number | null) => {
     view.dispatchEvent(Object.assign(new Event("deviceorientation"), { beta, gamma }));
@@ -40,7 +47,7 @@ function harness(options: {
     frames.clear();
     batch.forEach((callback) => callback(0));
   };
-  return { element, values, pupilValues, frames, view, doc, media, requestPermission, tilt, flush };
+  return { element, values, attributes, pupilValues, antennaValues, furValues, frames, view, doc, media, requestPermission, tilt, flush };
 }
 
 describe("mobile mascot gyroscope", () => {
@@ -52,6 +59,7 @@ describe("mobile mascot gyroscope", () => {
     expect(h.requestPermission).toHaveBeenCalledOnce();
     h.tilt(0, 0);
     h.tilt(15, -15);
+    expect(h.attributes.get("data-mascot-idle")).toBe("false");
     expect(h.frames.size).toBe(1);
     h.flush();
     expect(h.values.get("--mascot-eye-x")).toBe("-3px");
@@ -59,6 +67,8 @@ describe("mobile mascot gyroscope", () => {
     expect(h.values.get("--mascot-rotate")).toBe("-2deg");
     expect(h.pupilValues.get("--mascot-eye-x")).toBe("-3px");
     expect(h.pupilValues.get("--mascot-eye-y")).toBe("2px");
+    expect(h.antennaValues.get("--mascot-antenna-rotate")).toBe("-2.5deg");
+    expect(h.furValues.get("scale")).toBe("0.4");
     result.cleanup();
   });
 

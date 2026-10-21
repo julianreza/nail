@@ -7,9 +7,12 @@ import MascotIllustration from "../mascot-illustration";
 import "./login-mascot.css";
 
 export default function LoginMascot() {
-  const root = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLButtonElement>(null);
   const mounted = useRef(false);
   const gyroscopeCleanup = useRef<(() => void) | null>(null);
+  const reactionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reactionFrame = useRef<number | null>(null);
+  const [isReacting, setIsReacting] = useState(false);
   const [motionStatus, setMotionStatus] = useState<MascotGyroscopeStatus | "idle" | "requesting">("idle");
 
   useEffect(() => {
@@ -21,8 +24,24 @@ export default function LoginMascot() {
       cleanupTracking();
       gyroscopeCleanup.current?.();
       gyroscopeCleanup.current = null;
+      if (reactionTimer.current) clearTimeout(reactionTimer.current);
+      if (reactionFrame.current !== null) cancelAnimationFrame(reactionFrame.current);
     };
   }, []);
+
+  const playMascotClick = () => {
+    setIsReacting(false);
+    if (reactionTimer.current) clearTimeout(reactionTimer.current);
+    if (reactionFrame.current !== null) cancelAnimationFrame(reactionFrame.current);
+    reactionFrame.current = requestAnimationFrame(() => {
+      setIsReacting(true);
+      reactionFrame.current = null;
+    });
+    reactionTimer.current = setTimeout(() => {
+      setIsReacting(false);
+      reactionTimer.current = null;
+    }, 600);
+  };
 
   const toggleGyroscope = async () => {
     if (gyroscopeCleanup.current) {
@@ -54,9 +73,17 @@ export default function LoginMascot() {
 
   return (
     <>
-      <div className="login-mascot" data-login-mascot aria-hidden="true" ref={root}>
+      <button
+        aria-label="Putar animasi mascot"
+        className={`login-mascot${isReacting ? " is-reacting" : ""}`}
+        data-login-mascot
+        data-mascot-idle="true"
+        onClick={playMascotClick}
+        ref={root}
+        type="button"
+      >
         <MascotIllustration />
-      </div>
+      </button>
       <div className="login-mascot-motion-control">
         <button
           aria-pressed={motionStatus === "enabled"}

@@ -8,6 +8,7 @@ export function attachMascotTracking(element: HTMLElement): () => void {
   const fine = view.matchMedia("(hover: hover) and (pointer: fine)");
   const reduced = view.matchMedia("(prefers-reduced-motion: reduce)");
   let frame: number | undefined;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let point: { x: number; y: number } | undefined;
 
   const apply = (pose: MascotPose) => {
@@ -18,19 +19,31 @@ export function attachMascotTracking(element: HTMLElement): () => void {
     element.style.setProperty("--mascot-head-x", `${pose.headX}px`);
     element.style.setProperty("--mascot-head-y", `${pose.headY}px`);
     element.style.setProperty("--mascot-rotate", `${pose.rotate}deg`);
+    element.style.setProperty("--mascot-fur-scale", `${pose.furScale}`);
     const pupils = element.querySelector<SVGElement>(".login-mascot-pupils");
     pupils?.style.setProperty("--mascot-eye-x", eyeX);
     pupils?.style.setProperty("--mascot-eye-y", eyeY);
+    element.querySelector<SVGElement>(".mascot-antenna")?.style.setProperty("--mascot-antenna-rotate", `${pose.antennaRotate}deg`);
+    element.querySelector<SVGElement>("[data-mascot-fur-displacement]")?.setAttribute("scale", `${pose.furScale}`);
   };
   const enabled = () => fine.matches && !reduced.matches && !doc.hidden;
   const reset = () => {
     if (frame !== undefined) view.cancelAnimationFrame(frame);
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
+    idleTimer = undefined;
     frame = undefined;
     point = undefined;
+    element.setAttribute("data-mascot-idle", "true");
     apply(NEUTRAL_POSE);
   };
   const onPointerMove = (event: PointerEvent) => {
     if (event.pointerType !== "mouse" || !enabled()) return;
+    element.setAttribute("data-mascot-idle", "false");
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      element.setAttribute("data-mascot-idle", "true");
+      idleTimer = undefined;
+    }, 700);
     point = { x: event.clientX, y: event.clientY };
     if (frame !== undefined) return;
     frame = view.requestAnimationFrame(() => {

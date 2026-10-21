@@ -8,11 +8,11 @@ describe("mascot pose", () => {
     expect(getMascotPose(200, 100, bounds)).toEqual(NEUTRAL_POSE);
   });
   it("clamps movement even far outside the artwork", () => {
-    expect(getMascotPose(10000, 10000, bounds)).toEqual({ eyeX: 6, eyeY: 4, headX: 3, headY: 2, rotate: 4 });
-    expect(getMascotPose(-10000, -10000, bounds)).toEqual({ eyeX: -6, eyeY: -4, headX: -3, headY: -2, rotate: -4 });
+    expect(getMascotPose(10000, 10000, bounds)).toEqual({ eyeX: 6, eyeY: 4, headX: 3, headY: 2, rotate: 4, antennaRotate: 5, furScale: 0.8 });
+    expect(getMascotPose(-10000, -10000, bounds)).toEqual({ eyeX: -6, eyeY: -4, headX: -3, headY: -2, rotate: -4, antennaRotate: -5, furScale: 0.8 });
   });
   it("produces proportional movement inside the bounds", () => {
-    expect(getMascotPose(250, 125, bounds)).toEqual({ eyeX: 3, eyeY: 2, headX: 1.5, headY: 1, rotate: 2 });
+    expect(getMascotPose(250, 125, bounds)).toEqual({ eyeX: 3, eyeY: 2, headX: 1.5, headY: 1, rotate: 2, antennaRotate: 2.5, furScale: 0.4 });
   });
   it("maps phone tilt proportionally to bounded gaze", () => {
     expect(getMascotPoseFromOrientation(0, 0)).toEqual(NEUTRAL_POSE);
@@ -22,6 +22,8 @@ describe("mascot pose", () => {
       headX: -1.5,
       headY: 1,
       rotate: -2,
+      antennaRotate: -2.5,
+      furScale: 0.4,
     });
   });
   it("clamps extreme tilt and rejects invalid sensor readings", () => {
@@ -31,6 +33,8 @@ describe("mascot pose", () => {
       headX: -3,
       headY: 2,
       rotate: -4,
+      antennaRotate: -5,
+      furScale: 0.8,
     });
     expect(getMascotPoseFromOrientation(null, 10)).toEqual(NEUTRAL_POSE);
     expect(getMascotPoseFromOrientation(10, NaN)).toEqual(NEUTRAL_POSE);

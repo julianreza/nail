@@ -50,11 +50,14 @@ export async function enableMascotGyroscope(element: HTMLElement): Promise<Masco
     const pupils = element.querySelector<SVGElement>(".login-mascot-pupils");
     pupils?.style.setProperty("--mascot-eye-x", eyeX);
     pupils?.style.setProperty("--mascot-eye-y", eyeY);
+    element.querySelector<SVGElement>(".mascot-antenna")?.style.setProperty("--mascot-antenna-rotate", `${pose.antennaRotate}deg`);
+    element.querySelector<SVGElement>("[data-mascot-fur-displacement]")?.setAttribute("scale", `${pose.furScale}`);
   };
   const reset = () => {
     if (frame !== undefined) view.cancelAnimationFrame(frame);
     frame = undefined;
     orientation = undefined;
+    element.setAttribute("data-mascot-idle", "true");
     apply(NEUTRAL_POSE);
   };
   const onOrientation = (event: Event) => {
@@ -63,6 +66,7 @@ export async function enableMascotGyroscope(element: HTMLElement): Promise<Masco
       return;
     }
     const reading = event as DeviceOrientationEvent;
+    element.setAttribute("data-mascot-idle", "false");
     orientation = { beta: reading.beta, gamma: reading.gamma };
     if (frame !== undefined) return;
     frame = view.requestAnimationFrame(() => {

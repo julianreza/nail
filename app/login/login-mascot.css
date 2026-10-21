@@ -4,11 +4,25 @@
   --mascot-head-x: 0px;
   --mascot-head-y: 0px;
   --mascot-rotate: 0deg;
+  --mascot-fur-scale: 0;
   position: relative;
   z-index: 1;
-  width: 220px;
-  height: 190px;
-  pointer-events: none;
+  display: block;
+  width: 286px;
+  height: 247px;
+  padding: 0;
+  border: 0;
+  appearance: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.login-mascot:focus-visible {
+  outline: 3px solid var(--foreground);
+  outline-offset: 5px;
+  border-radius: 50%;
 }
 
 .login-mascot > svg {
@@ -27,6 +41,42 @@
 .login-mascot-pupils {
   transform: translate(var(--mascot-eye-x), var(--mascot-eye-y));
   transition: transform 120ms ease-out;
+}
+
+.mascot-antenna {
+  --mascot-antenna-rotate: 0deg;
+  transform-box: view-box;
+  transform-origin: 120px 55px;
+  transform: rotate(var(--mascot-antenna-rotate));
+  transition: transform 140ms ease-out;
+}
+
+.mascot-eyelid {
+  transform-box: view-box;
+  transform-origin: 120.1464px 105.4666px;
+  transform: scaleY(0);
+}
+
+.login-mascot[data-mascot-idle="true"] .mascot-eyelid {
+  animation: mascot-idle-blink 5.8s ease-in-out infinite;
+}
+
+.login-mascot.is-reacting > svg {
+  animation: mascot-click-bounce 560ms ease-out 1 both;
+}
+
+@keyframes mascot-idle-blink {
+  0%, 92%, 100% { transform: scaleY(0); }
+  94% { transform: scaleY(1); }
+  96% { transform: scaleY(0); }
+}
+
+@keyframes mascot-click-bounce {
+  0% { transform: scale(1); }
+  18% { transform: scale(1.09, 0.88); }
+  42% { transform: scale(0.94, 1.08); }
+  68% { transform: scale(1.035, 0.97); }
+  100% { transform: scale(1); }
 }
 
 .login-mascot-motion-control { display: none; }
@@ -63,7 +113,7 @@
   }
 
   .login-page .login-art {
-    min-height: 200px;
+    min-height: 290px;
     margin: 0;
   }
 
@@ -76,10 +126,13 @@
   }
 
   .login-page .login-panel { border-top: 0; }
-  .login-mascot { width: 180px; height: 156px; }
+  .login-mascot { width: min(286px, 78vw); height: auto; aspect-ratio: 286 / 247; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .login-mascot-head,
-  .login-mascot-pupils { transition: none; }
+  .login-mascot-pupils,
+  .mascot-antenna { transition: none; }
+  .login-mascot .mascot-eyelid { animation: none !important; transform: scaleY(0) !important; }
+  .login-mascot.is-reacting > svg { animation: none !important; }
 }
