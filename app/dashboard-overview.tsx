@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import WorkspaceIcon from "./workspace-icon";
 import MascotIllustration from "./mascot-illustration";
+import DashboardAgentStudio from "./dashboard-agent-studio";
+import DashboardOperations from "./dashboard-operations";
 
 export interface OverviewPayload {
   projectsCount: number;
@@ -69,6 +71,10 @@ export function DashboardSummary({ overview }: { overview: OverviewPayload }) {
           </article>
         ))}
       </div>
+      <div className="dashboard-command-grid">
+        <DashboardAgentStudio agentsCount={overview.agentsCount} />
+        <DashboardOperations overview={overview} />
+      </div>
       <section className="dashboard-empty-panel">
         <div aria-hidden="true" className="empty-illustration">N</div>
         <div>
@@ -129,7 +135,7 @@ export default function DashboardOverview() {
           <p className="eyebrow">OVERVIEW</p>
           <h2>Ringkasan <span>workspace</span></h2>
         </div>
-        <span className="live-indicator"><span aria-hidden="true" /> Data langsung</span>
+        <span className="dashboard-snapshot-label">Ringkasan tersimpan</span>
       </div>
 
       {loading ? (

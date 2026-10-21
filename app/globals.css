@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./reference-theme.css";
+@import "./dashboard-command-center.css";
 
 :root {
   --background: #eef4f1;
