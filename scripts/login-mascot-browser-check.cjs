@@ -1,4 +1,6 @@
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- This standalone .cjs runner uses Node's CommonJS loader.
 const assert = require("node:assert/strict");
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- Playwright is resolved at runtime from an optional external module path.
 const { chromium } = require(process.env.NAIL_PLAYWRIGHT_MODULE || "playwright");
 const base = process.env.NAIL_UI_URL;
 if (!base) throw new Error("Set NAIL_UI_URL to the loopback preview origin");
