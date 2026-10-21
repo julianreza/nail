@@ -23,12 +23,7 @@
 .login-art { position: relative; display: grid; min-height: 255px; flex: 1; place-items: center; margin: 18px -8px 10px; }
 .login-art-orbit { position: absolute; width: 240px; height: 240px; border: 1px solid #8cbe9e47; border-radius: 50%; }
 .login-art-orbit-inner { width: 186px; height: 186px; border-style: dashed; transform: rotate(20deg); }
-.login-art-core { position: relative; display: flex; width: 136px; height: 136px; align-items: center; justify-content: center; flex-direction: column; transform: rotate(-9deg); border: 2px solid var(--foreground); border-radius: 30px; background: var(--lime); box-shadow: 8px 8px 0 #0b302b; color: var(--foreground); font-size: 80px; font-weight: 850; line-height: 1.05; letter-spacing: -0.08em; }
-.login-art-core > span { margin-top: 5px; font-family: var(--font-geist-mono), monospace; font-size: 5px; font-weight: 650; letter-spacing: 0.07em; }
-.login-art-chip { position: absolute; padding: 8px 12px; border: 1px solid var(--foreground); border-radius: 9px; box-shadow: 3px 3px 0 #0b302b; color: var(--foreground); font-size: 11px; font-weight: 750; }
-.login-art-chip-projects { top: 25px; right: 4px; transform: rotate(7deg); background: var(--ice); }
-.login-art-chip-agents { top: 72px; left: 0; transform: rotate(-8deg); background: #e2d5ff; }
-.login-art-chip-approvals { right: 16px; bottom: 18px; transform: rotate(5deg); background: var(--peach); }
+
 .login-showcase-footer { display: flex; align-items: center; gap: 10px; padding-top: 18px; border-top: 1px solid #8cbe9e47; color: #c4dfd1; font-size: 10px; line-height: 1.6; }
 .login-showcase-footer > span { color: var(--lime); font-size: 25px; }
 
@@ -57,8 +52,6 @@
 @media (max-width: 1000px) {
   .login-showcase { padding: 32px 28px 24px; }
   .login-panel { padding: 34px; }
-  .login-art-chip-projects { right: -8px; }
-  .login-art-chip-agents { left: -8px; }
 }
 
 @media (max-width: 820px) {

@@ -1,4 +1,5 @@
 import LoginForm from "./login-form";
+import LoginMascot from "./login-mascot";
 import WorkspaceIcon from "../workspace-icon";
 import "./login.css";
 
@@ -25,10 +26,7 @@ export default function LoginPage() {
             <div className="login-art" aria-hidden="true">
               <div className="login-art-orbit" />
               <div className="login-art-orbit login-art-orbit-inner" />
-              <span className="login-art-core">N<span>MAKE ROOM FOR PROGRESS</span></span>
-              <span className="login-art-chip login-art-chip-projects">Projects ↗</span>
-              <span className="login-art-chip login-art-chip-agents">✦ Agents</span>
-              <span className="login-art-chip login-art-chip-approvals">✓ Approvals</span>
+              <LoginMascot />
             </div>
             <div className="login-showcase-footer"><span aria-hidden="true">✳</span> Workspace kamu. Keputusan tetap di tanganmu.</div>
           </aside>
