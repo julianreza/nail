@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import DashboardAgentStudio from "../../app/dashboard-agent-studio";
 
 describe("dashboard agent studio", () => {
-  it.each([0, 2, 1234])( "separates illustrated roles from %s saved agents", (agentsCount) => {
+  it.each([0, 2, 1234])("separates illustrated roles from %s saved agents", (agentsCount) => {
     const html = renderToStaticMarkup(createElement(DashboardAgentStudio, { agentsCount }));
     expect(html).toContain("Agent studio");
     expect(html).toContain(`${new Intl.NumberFormat("id-ID").format(agentsCount)} agent tersimpan`);
