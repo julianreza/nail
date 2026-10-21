@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 import type { ReactNode } from "react";
 import LogoutButton from "./logout-button";
 import WorkspaceIcon from "./workspace-icon";
@@ -18,12 +19,13 @@ const primaryLinks = [
 
 export default function WorkspaceShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const currentPage = primaryLinks.find((link) => link.href === pathname)?.label
     ?? (pathname.startsWith("/projects/") ? "Project detail" : "Pengaturan");
 
   return (
     <div className="workspace-layout">
-      <aside className="workspace-sidebar">
+      <aside className={`workspace-sidebar${sidebarOpen ? " is-open" : ""}`} id="workspace-navigation">
         <Link className="workspace-brand" href="/" aria-label="Nail — ringkasan">
           <span className="workspace-brand-mark mascot-brand-mark" data-mascot-brand aria-hidden="true">
             <MascotIllustration />
@@ -74,6 +76,16 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
       <div className="workspace-main-column">
         <header className="workspace-topbar">
           <div className="workspace-topbar-context">
+            <button
+              aria-controls="workspace-navigation"
+              aria-expanded={sidebarOpen}
+              aria-label={sidebarOpen ? "Sembunyikan navigasi" : "Tampilkan navigasi"}
+              className="workspace-menu-toggle"
+              onClick={() => setSidebarOpen((open) => !open)}
+              type="button"
+            >
+              <span aria-hidden="true">☰</span>
+            </button>
             <span className="topbar-owner-badge"><span aria-hidden="true" /> OWNER</span>
             <p aria-label="Halaman aktif">{currentPage}</p>
             <span className="topbar-caption">Workspace pribadi, kendali penuh.</span>
