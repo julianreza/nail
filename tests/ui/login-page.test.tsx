@@ -32,7 +32,7 @@ describe("owner login page", () => {
   it("uses the cursor mascot only for the large art and preserves the header brand", () => {
     const markup = renderToStaticMarkup(createElement(LoginPage));
     expect(markup.match(/data-login-mascot/g)).toHaveLength(1);
-    expect(markup).toContain('class="workspace-brand-mark"');
+    expect(markup).toContain("data-mascot-brand");
     expect(markup).not.toContain('class="login-art-core"');
     expect(markup).not.toContain("login-art-chip");
   });

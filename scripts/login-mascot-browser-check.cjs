@@ -20,23 +20,41 @@ if (!base) throw new Error("Set NAIL_UI_URL to the loopback preview origin");
           links.map((link) => ({ type: link.getAttribute("type"), href: link.href })),
         );
         assert.equal(icons.length, 1);
-        assert.equal(icons[0].type, "image/svg+xml");
-        const fetchedIcon = await page.evaluate(async (href) => {
+        assert.equal(icons[0].type, "image/png");
+        const iconInfo = await page.evaluate(async (href) => {
           const response = await fetch(href);
-          return { ok: response.ok, contentType: response.headers.get("content-type"), body: await response.text() };
+          const bitmap = await createImageBitmap(await response.blob());
+          const result = { ok: response.ok, contentType: response.headers.get("content-type"), width: bitmap.width, height: bitmap.height };
+          bitmap.close();
+          return result;
         }, icons[0].href);
-        assert.equal(fetchedIcon.ok, true);
-        assert.match(fetchedIcon.contentType, /image\/svg\+xml/);
-        assert.ok(fetchedIcon.body.includes("<svg"));
-        assert.match(fetchedIcon.body, /#c6ff4a/i);
+        assert.equal(iconInfo.ok, true);
+        assert.match(iconInfo.contentType, /image\/png/);
+        assert.equal(iconInfo.width, 128);
+        assert.equal(iconInfo.height, 128);
+        const layerInfo = await page.evaluate(async () => Promise.all([
+          "/branding/nail-monster-body.png",
+          "/branding/nail-monster-pupil.png",
+        ].map(async (src) => {
+          const response = await fetch(src);
+          const bitmap = await createImageBitmap(await response.blob());
+          const result = { src, ok: response.ok, width: bitmap.width, height: bitmap.height };
+          bitmap.close();
+          return result;
+        })));
+        assert.deepEqual(layerInfo.map(({ ok, width, height }) => [ok, width, height]), [
+          [true, 1024, 1024], [true, 1024, 1024],
+        ]);
       }
       const mascot = page.locator("[data-login-mascot]");
       await mascot.waitFor({ state: "visible" });
       assert.equal(await mascot.count(), 1);
-      assert.equal(await page.locator(".workspace-brand-mark").innerText(), "N");
+      assert.equal(await page.locator(".workspace-brand-mark [data-monster-mascot]").count(), 1);
+      assert.equal(await page.locator('[data-login-mascot] image[href="/branding/nail-monster-body.png"]').count(), 1);
+      assert.equal(await page.locator('[data-login-mascot] image[href="/branding/nail-monster-pupil.png"]').count(), 1);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       assert.equal(await page.locator("#password").getAttribute("type"), "password");
-      await page.screenshot({ path: `${process.env.TMPDIR || "."}/nail-cursor-mascot-${width}.png`, fullPage: true });
+      await page.screenshot({ path: `${process.env.TMPDIR || "."}/nail-monster-${width}.png`, fullPage: true });
     }
     await page.setViewportSize({ width: 1440, height: 960 });
     await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -47,16 +65,16 @@ if (!base) throw new Error("Set NAIL_UI_URL to the loopback preview origin");
     await page.mouse.move(rect.x - rect.width, rect.y + rect.height / 2);
     await page.waitForFunction(() => document.querySelector("[data-login-mascot]").style.getPropertyValue("--mascot-eye-x") === "-6px");
     await page.waitForFunction(() => Math.abs(new DOMMatrix(getComputedStyle(document.querySelector(".login-mascot-pupils")).transform).m41 + 6) < 0.01);
-    await page.locator(".login-mascot-pupils").screenshot({ path: `${process.env.TMPDIR || "."}/nail-mascot-gaze-left.png` });
+    await page.locator(".login-mascot-pupils").screenshot({ path: `${process.env.TMPDIR || "."}/nail-monster-gaze-left.png` });
     await page.mouse.move(rect.x + rect.width * 2, rect.y + rect.height / 2);
     await page.waitForFunction(() => document.querySelector("[data-login-mascot]").style.getPropertyValue("--mascot-eye-x") === "6px");
     await page.waitForFunction(() => Math.abs(new DOMMatrix(getComputedStyle(document.querySelector(".login-mascot-pupils")).transform).m41 - 6) < 0.01);
-    await page.locator(".login-mascot-pupils").screenshot({ path: `${process.env.TMPDIR || "."}/nail-mascot-gaze-right.png` });
+    await page.locator(".login-mascot-pupils").screenshot({ path: `${process.env.TMPDIR || "."}/nail-monster-gaze-right.png` });
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.waitForFunction(() => document.querySelector("[data-login-mascot]").style.getPropertyValue("--mascot-eye-x") === "0px");
     await page.mouse.move(10, 10);
     assert.equal(await mascot.evaluate((el) => el.style.getPropertyValue("--mascot-eye-x")), "0px");
-    assert.equal(await page.locator(".login-mascot-blink").evaluate((el) => getComputedStyle(el).animationName), "none");
+    assert.equal(await page.locator(".login-mascot-pupils").evaluate((el) => getComputedStyle(el).transitionDuration), "0s");
 
     const mobile = await browser.newContext({
       viewport: { width: 390, height: 844 },
@@ -70,8 +88,7 @@ if (!base) throw new Error("Set NAIL_UI_URL to the loopback preview origin");
     await touchPage.locator("[data-login-mascot]").waitFor({ state: "visible" });
     await touchPage.mouse.move(10, 10);
     assert.equal(await touchPage.locator("[data-login-mascot]").evaluate((el) => el.style.getPropertyValue("--mascot-eye-x")), "0px");
-    assert.equal(await touchPage.locator(".login-mascot-blink").evaluate((el) => getComputedStyle(el).animationName), "none");
-    assert.notEqual(await touchPage.locator(".login-mascot-pupils").evaluate((el) => getComputedStyle(el).transitionDuration), "0s");
+    assert.equal(await touchPage.locator(".login-mascot-pupils").evaluate((el) => getComputedStyle(el).transitionDuration), "120ms");
     await touchPage.evaluate(() => {
       Object.defineProperty(window, "DeviceOrientationEvent", {
         configurable: true,
@@ -106,7 +123,7 @@ if (!base) throw new Error("Set NAIL_UI_URL to the loopback preview origin");
     assert.deepEqual(errors, []);
     await mobile.close();
     await context.close();
-    console.log("PASS: mascot render, desktop gaze, mobile tilt opt-in/denial, responsive layout, reduced motion, no JS errors");
+    console.log("PASS: monster render, desktop gaze, mobile tilt opt-in/denial, responsive layout, reduced motion, no JS errors");
   } finally {
     await browser.close();
   }

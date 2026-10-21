@@ -20,18 +20,13 @@
 
 .login-mascot-head {
   transform: translate(var(--mascot-head-x), var(--mascot-head-y)) rotate(var(--mascot-rotate));
-  transform-origin: 120px 105px;
+  transform-origin: 120px 100px;
   transition: transform 120ms ease-out;
 }
 
 .login-mascot-pupils {
   transform: translate(var(--mascot-eye-x), var(--mascot-eye-y));
   transition: transform 120ms ease-out;
-}
-
-.login-mascot-blink {
-  transform-origin: 118px 97px;
-  animation: nail-mascot-blink 6s infinite;
 }
 
 .login-mascot-motion-control { display: none; }
@@ -49,11 +44,6 @@
 }
 .login-mascot-motion-button:focus-visible { outline: 3px solid var(--lime); outline-offset: 3px; }
 .login-mascot-motion-button:disabled { cursor: wait; opacity: 0.7; }
-
-@keyframes nail-mascot-blink {
-  0%, 92%, 96%, 100% { transform: scaleY(1); }
-  94% { transform: scaleY(0.08); }
-}
 
 @media (max-width: 820px) {
   .login-page .login-showcase {
@@ -90,11 +80,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .login-mascot-blink { animation: none; }
   .login-mascot-head,
   .login-mascot-pupils { transition: none; }
-}
-
-@media (hover: none), (pointer: coarse) {
-  .login-mascot-blink { animation: none; }
 }

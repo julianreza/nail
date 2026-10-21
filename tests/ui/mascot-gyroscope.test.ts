@@ -8,6 +8,7 @@ function harness(options: {
   reduced?: boolean;
 } = {}) {
   const values = new Map<string, string>();
+  const pupilValues = new Map<string, string>();
   const frames = new Map<number, FrameRequestCallback>();
   const media = Object.assign(new EventTarget(), { matches: options.reduced ?? false });
   const requestPermission = vi.fn(async () => options.permission ?? "granted");
@@ -27,6 +28,9 @@ function harness(options: {
   const element = {
     ownerDocument: doc,
     style: { setProperty: (key: string, value: string) => values.set(key, value) },
+    querySelector: (selector: string) => selector === ".login-mascot-pupils"
+      ? { style: { setProperty: (key: string, value: string) => { pupilValues.set(key, value); } } }
+      : null,
   } as unknown as HTMLElement;
   const tilt = (beta: number | null, gamma: number | null) => {
     view.dispatchEvent(Object.assign(new Event("deviceorientation"), { beta, gamma }));
@@ -36,7 +40,7 @@ function harness(options: {
     frames.clear();
     batch.forEach((callback) => callback(0));
   };
-  return { element, values, frames, view, doc, media, requestPermission, tilt, flush };
+  return { element, values, pupilValues, frames, view, doc, media, requestPermission, tilt, flush };
 }
 
 describe("mobile mascot gyroscope", () => {
@@ -53,6 +57,8 @@ describe("mobile mascot gyroscope", () => {
     expect(h.values.get("--mascot-eye-x")).toBe("-3px");
     expect(h.values.get("--mascot-eye-y")).toBe("2px");
     expect(h.values.get("--mascot-rotate")).toBe("-2deg");
+    expect(h.pupilValues.get("--mascot-eye-x")).toBe("-3px");
+    expect(h.pupilValues.get("--mascot-eye-y")).toBe("2px");
     result.cleanup();
   });
 

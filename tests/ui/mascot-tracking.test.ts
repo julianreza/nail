@@ -3,6 +3,7 @@ import { attachMascotTracking } from "../../app/login/mascot-tracking";
 
 function harness() {
   const values = new Map<string, string>();
+  const pupilValues = new Map<string, string>();
   const frames = new Map<number, FrameRequestCallback>();
   let sequence = 0;
   const fine = Object.assign(new EventTarget(), { matches: true });
@@ -16,13 +17,16 @@ function harness() {
   const element = {
     ownerDocument: doc,
     style: { setProperty: (key: string, value: string) => { values.set(key, value); } },
+    querySelector: (selector: string) => selector === ".login-mascot-pupils"
+      ? { style: { setProperty: (key: string, value: string) => { pupilValues.set(key, value); } } }
+      : null,
     getBoundingClientRect: () => ({ left: 100, top: 50, width: 200, height: 100 }),
   } as unknown as HTMLElement;
   const move = (x: number, y: number, pointerType = "mouse") => {
     view.dispatchEvent(Object.assign(new Event("pointermove"), { clientX: x, clientY: y, pointerType }));
   };
   const flush = () => { const batch = [...frames.values()]; frames.clear(); batch.forEach((cb) => cb(0)); };
-  return { element, values, frames, view, doc, fine, reduced, move, flush };
+  return { element, values, pupilValues, frames, view, doc, fine, reduced, move, flush };
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -36,6 +40,8 @@ describe("mascot tracking", () => {
     expect(h.values.get("--mascot-eye-x")).toBe("6px");
     expect(h.values.get("--mascot-eye-y")).toBe("4px");
     expect(h.values.get("--mascot-rotate")).toBe("4deg");
+    expect(h.pupilValues.get("--mascot-eye-x")).toBe("6px");
+    expect(h.pupilValues.get("--mascot-eye-y")).toBe("4px");
     cleanup();
   });
   it("ignores touch, disables reduced motion, and resets on blur", () => {

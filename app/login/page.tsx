@@ -1,5 +1,6 @@
 import LoginForm from "./login-form";
 import LoginMascot from "./login-mascot";
+import MascotIllustration from "../mascot-illustration";
 import WorkspaceIcon from "../workspace-icon";
 import "./login.css";
 
@@ -9,7 +10,9 @@ export default function LoginPage() {
       <div className="login-shell">
         <div className="login-brand-row">
           <div className="workspace-brand">
-            <span className="workspace-brand-mark" aria-hidden="true">N</span>
+            <span className="workspace-brand-mark mascot-brand-mark" data-mascot-brand aria-hidden="true">
+              <MascotIllustration />
+            </span>
             <span>
               <strong>Nail</strong>
               <small>Agent workspace</small>

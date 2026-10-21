@@ -76,7 +76,7 @@ export function DashboardSummary({ overview }: { overview: OverviewPayload }) {
         <DashboardOperations overview={overview} />
       </div>
       <section className="dashboard-empty-panel">
-        <div aria-hidden="true" className="empty-illustration">N</div>
+        <div aria-hidden="true" className="empty-illustration"><MascotIllustration /></div>
         <div>
           <p className="eyebrow">LANGKAH BERIKUTNYA</p>
           <h3>{overview.projectsCount === 0 ? "Mulai dari sebuah project" : "Workspace siap dipakai"}</h3>

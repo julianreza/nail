@@ -15,7 +15,12 @@ describe("login mascot", () => {
     const html = renderToStaticMarkup(createElement(LoginMascot));
     expect(html).toContain("data-login-mascot");
     expect(html).toContain('aria-hidden="true"');
+    expect(html).toContain('data-monster-mascot="true"');
     expect(html).toContain('viewBox="0 0 240 200"');
+    expect(html.match(/<image /g)).toHaveLength(2);
+    expect(html).toContain('href="/branding/nail-monster-body.png"');
+    expect(html).toContain('href="/branding/nail-monster-pupil.png"');
+    expect(html).toContain('clip-path="url(#nail-mascot-eye-');
     expect(html).not.toContain("<canvas");
     expect(html).not.toContain(".riv");
     expect(html).not.toContain("tabindex");

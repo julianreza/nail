@@ -40,11 +40,16 @@ export async function enableMascotGyroscope(element: HTMLElement): Promise<Masco
   let frame: number | undefined;
   let orientation: { beta: number | null; gamma: number | null } | undefined;
   const apply = (pose: MascotPose) => {
-    element.style.setProperty("--mascot-eye-x", `${pose.eyeX}px`);
-    element.style.setProperty("--mascot-eye-y", `${pose.eyeY}px`);
+    const eyeX = `${pose.eyeX}px`;
+    const eyeY = `${pose.eyeY}px`;
+    element.style.setProperty("--mascot-eye-x", eyeX);
+    element.style.setProperty("--mascot-eye-y", eyeY);
     element.style.setProperty("--mascot-head-x", `${pose.headX}px`);
     element.style.setProperty("--mascot-head-y", `${pose.headY}px`);
     element.style.setProperty("--mascot-rotate", `${pose.rotate}deg`);
+    const pupils = element.querySelector<SVGElement>(".login-mascot-pupils");
+    pupils?.style.setProperty("--mascot-eye-x", eyeX);
+    pupils?.style.setProperty("--mascot-eye-y", eyeY);
   };
   const reset = () => {
     if (frame !== undefined) view.cancelAnimationFrame(frame);
