@@ -70,11 +70,8 @@ if (!base) throw new Error("Set NAIL_UI_URL to the loopback preview origin");
       window.dispatchEvent(Object.assign(new Event("deviceorientation"), { beta: 15, gamma: -15 }));
     });
     await touchPage.waitForFunction(() => document.querySelector("[data-login-mascot]").style.getPropertyValue("--mascot-eye-x") === "-3px");
-    await touchPage.waitForFunction(
-      () => Math.abs(new DOMMatrix(getComputedStyle(document.querySelector(".login-mascot-pupils")).transform).m41 + 3) < 0.05,
-      null,
-      { polling: 100 },
-    );
+    await touchPage.waitForTimeout(500);
+    assert.ok(await touchPage.locator(".login-mascot-pupils").evaluate((el) => Math.abs(new DOMMatrix(getComputedStyle(el).transform).m41 + 3) < 0.05));
     await gyroToggle.click();
     assert.equal(await touchPage.locator("[data-login-mascot]").evaluate((el) => el.style.getPropertyValue("--mascot-eye-x")), "0px");
     await touchPage.evaluate(() => {
