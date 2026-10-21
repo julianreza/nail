@@ -50,7 +50,7 @@ if (!base) throw new Error("Set NAIL_UI_URL to the loopback preview origin");
       await mascot.waitFor({ state: "visible" });
       assert.equal(await mascot.count(), 1);
       assert.equal(await page.locator(".workspace-brand-mark [data-monster-mascot]").count(), 1);
-      assert.equal(await page.locator('[data-login-mascot] image[href="/branding/nail-monster-body.png"]').count(), 1);
+      assert.equal(await page.locator('[data-login-mascot] image[href="/branding/nail-monster-body.png"]').count(), 3);
       assert.equal(await page.locator('[data-login-mascot] image[href="/branding/nail-monster-pupil.png"]').count(), 1);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       assert.equal(await page.locator("#password").getAttribute("type"), "password");
@@ -65,11 +65,26 @@ if (!base) throw new Error("Set NAIL_UI_URL to the loopback preview origin");
     await page.mouse.move(rect.x - rect.width, rect.y + rect.height / 2);
     await page.waitForFunction(() => document.querySelector("[data-login-mascot]").style.getPropertyValue("--mascot-eye-x") === "-6px");
     await page.waitForFunction(() => Math.abs(new DOMMatrix(getComputedStyle(document.querySelector("[data-login-mascot] .login-mascot-pupils")).transform).m41 + 6) < 0.01);
-    await page.locator("[data-login-mascot] .login-mascot-pupils").screenshot({ path: `${process.env.TMPDIR || "."}/nail-monster-gaze-left.png` });
+    await page.waitForFunction(() => new DOMMatrix(getComputedStyle(document.querySelector('[data-login-mascot] .mascot-antenna')).transform).b < -0.08);
+    assert.ok(Number(await mascot.locator('[data-mascot-fur-displacement]').getAttribute('scale')) > 0);
+    await mascot.screenshot({ path: `${process.env.TMPDIR || "."}/nail-monster-gaze-left.png` });
     await page.mouse.move(rect.x + rect.width * 2, rect.y + rect.height / 2);
     await page.waitForFunction(() => document.querySelector("[data-login-mascot]").style.getPropertyValue("--mascot-eye-x") === "6px");
     await page.waitForFunction(() => Math.abs(new DOMMatrix(getComputedStyle(document.querySelector("[data-login-mascot] .login-mascot-pupils")).transform).m41 - 6) < 0.01);
-    await page.locator("[data-login-mascot] .login-mascot-pupils").screenshot({ path: `${process.env.TMPDIR || "."}/nail-monster-gaze-right.png` });
+    await page.waitForFunction(() => new DOMMatrix(getComputedStyle(document.querySelector('[data-login-mascot] .mascot-antenna')).transform).b > 0.08);
+    await mascot.screenshot({ path: `${process.env.TMPDIR || "."}/nail-monster-gaze-right.png` });
+    await mascot.click();
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-login-mascot] > svg')).animationName === 'mascot-click-bounce');
+    await page.waitForFunction(() => !document.querySelector('[data-login-mascot]').classList.contains('is-reacting'));
+    await page.waitForFunction(() => document.querySelector('[data-login-mascot]').getAttribute('data-mascot-idle') === 'true');
+    assert.equal(await mascot.locator('.mascot-eyelid').evaluate(el => getComputedStyle(el).animationName), 'mascot-idle-blink');
+    await mascot.locator('.mascot-eyelid').evaluate(el => {
+      const animation = el.getAnimations()[0];
+      animation.pause();
+      animation.currentTime = 5800 * 0.94;
+    });
+    assert.ok(await mascot.locator('.mascot-eyelid').evaluate(el => Number(getComputedStyle(el).opacity) > 0.99));
+    await mascot.screenshot({ path: `${process.env.TMPDIR || "."}/nail-monster-blink.png` });
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.waitForFunction(() => document.querySelector("[data-login-mascot]").style.getPropertyValue("--mascot-eye-x") === "0px");
     await page.mouse.move(10, 10);
@@ -88,7 +103,7 @@ if (!base) throw new Error("Set NAIL_UI_URL to the loopback preview origin");
     await touchPage.locator("[data-login-mascot]").waitFor({ state: "visible" });
     await touchPage.mouse.move(10, 10);
     assert.equal(await touchPage.locator("[data-login-mascot]").evaluate((el) => el.style.getPropertyValue("--mascot-eye-x")), "0px");
-    assert.equal(await touchPage.locator("[data-login-mascot] .login-mascot-pupils").evaluate((el) => getComputedStyle(el).transitionDuration), "120ms");
+    assert.equal(await touchPage.locator("[data-login-mascot] .login-mascot-pupils").evaluate((el) => parseFloat(getComputedStyle(el).transitionDuration)), 0.12);
     await touchPage.evaluate(() => {
       Object.defineProperty(window, "DeviceOrientationEvent", {
         configurable: true,

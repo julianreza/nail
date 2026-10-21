@@ -18,7 +18,10 @@ export default function MascotIllustration() {
             <image href="/branding/nail-monster-pupil.png" x="0" y="-20" width="240" height="240" preserveAspectRatio="none" />
           </g>
         </g>
-        <ellipse className="mascot-eyelid" data-mascot-surface="eyelid" cx={MASCOT_EYE_CLIP.cx} cy={MASCOT_EYE_CLIP.cy} rx={MASCOT_EYE_CLIP.rx} ry={MASCOT_EYE_CLIP.ry} fill="#b0ef2d" />
+        <g className="mascot-eyelid" data-mascot-surface="eyelid" opacity="0">
+          <ellipse cx={MASCOT_EYE_CLIP.cx} cy={MASCOT_EYE_CLIP.cy} rx="34" ry="33" fill="#b0ef2d" />
+          <path data-mascot-eyelid-crease d="M101 105q19 12 38 0" stroke="#063e36" strokeWidth="2.5" strokeLinecap="round" />
+        </g>
       </g>
     </svg>
   );

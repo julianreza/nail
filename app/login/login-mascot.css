@@ -46,7 +46,7 @@
 .mascot-antenna {
   --mascot-antenna-rotate: 0deg;
   transform-box: view-box;
-  transform-origin: 120px 55px;
+  transform-origin: 123.5156px 42.1094px;
   transform: rotate(var(--mascot-antenna-rotate));
   transition: transform 140ms ease-out;
 }
@@ -66,9 +66,9 @@
 }
 
 @keyframes mascot-idle-blink {
-  0%, 92%, 100% { transform: scaleY(0); }
-  94% { transform: scaleY(1); }
-  96% { transform: scaleY(0); }
+  0%, 92%, 100% { transform: scaleY(0); opacity: 0; }
+  94% { transform: scaleY(1); opacity: 1; }
+  96% { transform: scaleY(0); opacity: 0; }
 }
 
 @keyframes mascot-click-bounce {
@@ -119,6 +119,7 @@
 
   .login-page .login-mascot-motion-control {
     position: absolute;
+    z-index: 2;
     bottom: 2px;
     left: 50%;
     display: block;
