@@ -26,6 +26,14 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
   return (
     <div className="workspace-layout">
       <aside className={`workspace-sidebar${sidebarOpen ? " is-open" : ""}`} id="workspace-navigation">
+        <button
+          aria-label="Tutup navigasi"
+          className="workspace-sidebar-close"
+          onClick={() => setSidebarOpen(false)}
+          type="button"
+        >
+          <span aria-hidden="true">×</span>
+        </button>
         <Link className="workspace-brand" href="/" aria-label="Nail — ringkasan">
           <span className="workspace-brand-mark mascot-brand-mark" data-mascot-brand aria-hidden="true">
             <MascotIllustration />
@@ -46,6 +54,7 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
                 className={`workspace-nav-link${active ? " is-active" : ""}`}
                 href={link.href}
                 key={link.href}
+                onClick={() => setSidebarOpen(false)}
               >
                 <span aria-hidden="true" className={`workspace-nav-mark icon-${link.icon}`}>
                   <WorkspaceIcon name={link.icon} />
@@ -61,6 +70,7 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
             aria-current={pathname === "/settings" ? "page" : undefined}
             className={`workspace-nav-link${pathname === "/settings" ? " is-active" : ""}`}
             href="/settings"
+            onClick={() => setSidebarOpen(false)}
           >
             <span aria-hidden="true" className="workspace-nav-mark icon-settings"><WorkspaceIcon name="settings" /></span>
             <span>Pengaturan</span>

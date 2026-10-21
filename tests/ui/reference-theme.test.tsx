@@ -13,6 +13,7 @@ describe("reference workspace presentation", () => {
   it("identifies the current page and retains one active navigation item and real destinations", () => {
     const markup = renderToStaticMarkup(<WorkspaceShell>Content</WorkspaceShell>);
     expect(markup).toContain('aria-label="Tampilkan navigasi"');
+    expect(markup).toContain('aria-label="Tutup navigasi"');
     expect(markup).toContain('aria-expanded="false"');
     expect(markup).toContain('aria-label="Nail — ringkasan"');
     expect(markup).toContain("data-mascot-brand");
