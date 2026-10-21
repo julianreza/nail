@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import WorkspaceIcon from "./workspace-icon";
+import MascotIllustration from "./mascot-illustration";
 
 export interface OverviewPayload {
   projectsCount: number;
@@ -39,7 +40,10 @@ export function DashboardSummary({ overview }: { overview: OverviewPayload }) {
       <section aria-label="Status workspace" className="workspace-hero">
         <div className="workspace-hero-art" aria-hidden="true">
           <span className="hero-sticker">Your next big thing.</span>
-          <span className="hero-emblem">N<span>NAIL WORKSPACE</span></span>
+          <span className="hero-emblem" data-dashboard-mascot>
+            <MascotIllustration />
+            <span>NAIL WORKSPACE</span>
+          </span>
           <span className="hero-art-caption">IDE → PROJECT → PROGRESS</span>
         </div>
         <div className="workspace-hero-copy">

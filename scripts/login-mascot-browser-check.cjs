@@ -15,6 +15,21 @@ if (!base) throw new Error("Set NAIL_UI_URL to the loopback preview origin");
     for (const width of [1440, 768, 390, 320]) {
       await page.setViewportSize({ width, height: 960 });
       await page.goto(`${base}/login`, { waitUntil: "networkidle" });
+      if (width === 1440) {
+        const icons = await page.locator('link[rel="icon"]').evaluateAll((links) =>
+          links.map((link) => ({ type: link.getAttribute("type"), href: link.href })),
+        );
+        assert.equal(icons.length, 1);
+        assert.equal(icons[0].type, "image/svg+xml");
+        const fetchedIcon = await page.evaluate(async (href) => {
+          const response = await fetch(href);
+          return { ok: response.ok, contentType: response.headers.get("content-type"), body: await response.text() };
+        }, icons[0].href);
+        assert.equal(fetchedIcon.ok, true);
+        assert.match(fetchedIcon.contentType, /image\/svg\+xml/);
+        assert.ok(fetchedIcon.body.includes("<svg"));
+        assert.match(fetchedIcon.body, /#c6ff4a/i);
+      }
       const mascot = page.locator("[data-login-mascot]");
       await mascot.waitFor({ state: "visible" });
       assert.equal(await mascot.count(), 1);

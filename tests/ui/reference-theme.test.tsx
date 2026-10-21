@@ -30,6 +30,9 @@ describe("reference workspace presentation", () => {
     const markup = renderToStaticMarkup(createElement(DashboardSummary, {
       overview: { projectsCount, agentsCount: 2, activeRunsCount: 0, queuedRunsCount: 0, pendingApprovalsCount: 0 },
     }));
+    expect(markup).toContain("data-dashboard-mascot");
+    expect(markup).toContain('viewBox="0 0 240 200"');
+    expect(markup).not.toContain('class="hero-emblem">N');
     expect(markup).toContain('aria-label="Status workspace"');
     expect(markup).toContain(`${projectsCount} project`);
     expect(markup).toContain("2 agent");
