@@ -26,23 +26,25 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
   return (
     <div className="workspace-layout">
       <aside className={`workspace-sidebar${sidebarOpen ? " is-open" : ""}`} id="workspace-navigation">
-        <button
-          aria-label="Tutup navigasi"
-          className="workspace-sidebar-close"
-          onClick={() => setSidebarOpen(false)}
-          type="button"
-        >
-          <span aria-hidden="true">×</span>
-        </button>
-        <Link className="workspace-brand" href="/" aria-label="Nail — ringkasan">
-          <span className="workspace-brand-mark mascot-brand-mark" data-mascot-brand aria-hidden="true">
-            <MascotIllustration />
-          </span>
-          <span>
-            <strong>Nail</strong>
-            <small>Agent workspace</small>
-          </span>
-        </Link>
+        <div className="workspace-sidebar-header">
+          <Link className="workspace-brand" href="/" aria-label="Nail — ringkasan">
+            <span className="workspace-brand-mark mascot-brand-mark" data-mascot-brand aria-hidden="true">
+              <MascotIllustration />
+            </span>
+            <span>
+              <strong>Nail</strong>
+              <small>Agent workspace</small>
+            </span>
+          </Link>
+          <button
+            aria-label="Tutup navigasi"
+            className="workspace-sidebar-close"
+            onClick={() => setSidebarOpen(false)}
+            type="button"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
 
         <nav aria-label="Navigasi utama" className="workspace-nav">
           <p className="workspace-nav-label">WORKSPACE</p>
@@ -82,6 +84,14 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
           <span>Owner aktif</span>
         </div>
       </aside>
+      {sidebarOpen ? (
+        <button
+          aria-label="Tutup navigasi"
+          className="workspace-sidebar-backdrop"
+          onClick={() => setSidebarOpen(false)}
+          type="button"
+        />
+      ) : null}
 
       <div className="workspace-main-column">
         <header className="workspace-topbar">

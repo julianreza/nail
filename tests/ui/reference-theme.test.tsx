@@ -16,6 +16,7 @@ describe("reference workspace presentation", () => {
     expect(markup).toContain('aria-label="Tutup navigasi"');
     expect(markup).toContain('aria-expanded="false"');
     expect(markup).toContain('aria-label="Nail — ringkasan"');
+    expect(markup).toContain('class="workspace-sidebar-header"><a class="workspace-brand"');
     expect(markup).toContain("data-mascot-brand");
     expect(markup).toContain('viewBox="0 0 240 200"');
     expect(markup).not.toContain("data-mascot-gyro-toggle");
