@@ -66,11 +66,17 @@ if (!base) throw new Error("Set NAIL_UI_URL to the loopback preview origin");
     const gyroToggle = touchPage.locator("[data-mascot-gyro-toggle]");
     await gyroToggle.click();
     await touchPage.waitForFunction(() => document.querySelector("[data-mascot-gyro-toggle]").getAttribute("aria-pressed") === "true");
+    // Test the final sensor-driven pose deterministically; normal transition duration is asserted above.
+    await touchPage.addStyleTag({ content: ".login-mascot-pupils { transition-duration: 0s !important; }" });
     await touchPage.evaluate(() => {
-      window.dispatchEvent(Object.assign(new Event("deviceorientation"), { beta: 15, gamma: -15 }));
+      for (let sample = 0; sample < 8; sample += 1) {
+        setTimeout(() => {
+          window.dispatchEvent(Object.assign(new Event("deviceorientation"), { beta: 15, gamma: -15 }));
+        }, sample * 50);
+      }
     });
-    await touchPage.waitForFunction(() => document.querySelector("[data-login-mascot]").style.getPropertyValue("--mascot-eye-x") === "-3px");
     await touchPage.waitForTimeout(500);
+    assert.equal(await touchPage.locator("[data-login-mascot]").evaluate((el) => el.style.getPropertyValue("--mascot-eye-x")), "-3px");
     assert.ok(await touchPage.locator(".login-mascot-pupils").evaluate((el) => Math.abs(new DOMMatrix(getComputedStyle(el).transform).m41 + 3) < 0.05));
     await gyroToggle.click();
     assert.equal(await touchPage.locator("[data-login-mascot]").evaluate((el) => el.style.getPropertyValue("--mascot-eye-x")), "0px");
