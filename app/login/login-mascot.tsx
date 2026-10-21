@@ -40,7 +40,7 @@ export default function LoginMascot() {
     reactionTimer.current = setTimeout(() => {
       setIsReacting(false);
       reactionTimer.current = null;
-    }, 600);
+    }, 740);
   };
 
   const toggleGyroscope = async () => {
