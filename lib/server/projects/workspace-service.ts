@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "../db/database";
 import { createApprovalService, type ApprovalScope } from "../runs/approval-service";
 import { createRepositories, type WorkspaceRecord } from "../db/repositories";
 import { withTransaction } from "../db/database";
@@ -210,13 +210,13 @@ function changedFilesBetween(baselinePath: string, workspacePath: string): Chang
   return changes;
 }
 
-export function createRunWorkspace(
-  database: DatabaseSync,
+export async function createRunWorkspace(
+  database: Database,
   options: WorkspaceOptions,
-): WorkspaceCreationResult {
+): Promise<WorkspaceCreationResult> {
   const repositories = createRepositories(database);
-  const run = repositories.runs.getById(options.runId);
-  const project = repositories.projects.getById(options.projectId);
+  const run = (await repositories.runs.getById(options.runId));
+  const project = (await repositories.projects.getById(options.projectId));
   if (!run || !project || run.projectId !== project.id) {
     throw new Error("Run and project must exist and belong together");
   }
@@ -229,7 +229,7 @@ export function createRunWorkspace(
   const approvals = createApprovalService(database, {
     allowedPermissions: options.allowedPermissions,
   });
-  if (!approvals.isExecutionApproved(run.id, options.scope)) {
+  if (!(await approvals.isExecutionApproved(run.id, options.scope))) {
     throw new Error("Workspace creation requires an approval for this plan and baseline");
   }
 
@@ -286,8 +286,8 @@ export function createRunWorkspace(
       });
     }
 
-    const record = withTransaction(database, () => {
-      const currentRun = repositories.runs.getById(options.runId);
+    const record = (await withTransaction(database, async () => {
+      const currentRun = (await repositories.runs.getById(options.runId));
       if (
         !currentRun ||
         (currentRun.state !== "queued" && currentRun.state !== "running")
@@ -295,7 +295,7 @@ export function createRunWorkspace(
         throw new Error("Run state changed before workspace creation");
       }
       assertBaselineMatches(currentRun.baselineCommit, options.baselineCommit);
-      return repositories.workspaces.create({
+      return (await repositories.workspaces.create({
         id: workspaceId,
         runId: options.runId,
         projectId: options.projectId,
@@ -305,8 +305,8 @@ export function createRunWorkspace(
         baselineCommit: options.baselineCommit,
         setupCommands: options.scope.setupCommands,
         verificationCommands: options.scope.verificationCommands,
-      });
-    });
+      }));
+    }));
 
     return {
       ...record,
@@ -321,17 +321,17 @@ export function createRunWorkspace(
   }
 }
 
-export function createCheckpoint(
-  database: DatabaseSync,
+export async function createCheckpoint(
+  database: Database,
   input: { runId: string; taskId?: string | null },
 ) {
   const repositories = createRepositories(database);
-  const workspace = repositories.workspaces.getByRunId(input.runId);
+  const workspace = (await repositories.workspaces.getByRunId(input.runId));
   if (!workspace || workspace.state !== "ready") {
     throw new Error("Run does not have an active workspace");
   }
   if (input.taskId) {
-    const task = repositories.tasks.getById(input.taskId);
+    const task = (await repositories.tasks.getById(input.taskId));
     if (!task || task.runId !== input.runId) {
       throw new Error("Checkpoint task must belong to the run");
     }
@@ -354,14 +354,14 @@ export function createCheckpoint(
   });
 
   try {
-    const checkpoint = repositories.checkpoints.create({
+    const checkpoint = (await repositories.checkpoints.create({
       id: randomUUID(),
       runId: input.runId,
       taskId: input.taskId ?? null,
       baselineCommit: workspace.baselineCommit,
       snapshotPath,
       changedFilesJson: JSON.stringify(changedFiles),
-    });
+    }));
     return { ...checkpoint, changedFiles, snapshotPath };
   } catch (error) {
     rmSync(snapshotPath, { force: true });

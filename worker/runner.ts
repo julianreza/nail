@@ -19,7 +19,7 @@ export type JobExecutor = (
 ) => Promise<WorkerOutcome>;
 
 export interface RunWorkerOnceOptions {
-  database: ReturnType<typeof openDatabase>;
+  database: Awaited<ReturnType<typeof openDatabase>>;
   workerId: string;
   execute: JobExecutor;
   now?: () => string;
@@ -50,11 +50,11 @@ export async function runWorkerOnce(
     throw new Error("Heartbeat interval must be shorter than the lease duration");
   }
 
-  const claim = claimNextJob(options.database, {
+  const claim = (await claimNextJob(options.database, {
     workerId: options.workerId,
     now: now(),
     leaseDurationMs,
-  });
+  }));
   if (!claim) return null;
 
   const controller = new AbortController();
@@ -63,44 +63,59 @@ export async function runWorkerOnce(
   if (options.signal?.aborted) forwardAbort();
 
   let leaseLost = false;
-  const heartbeat = setInterval(() => {
-    const renewed = heartbeatLease(options.database, {
-      workerId: claim.workerId,
-      runId: claim.runId,
-      now: now(),
-      leaseDurationMs,
-    });
-    if (!renewed) {
-      leaseLost = true;
-      controller.abort("worker_lease_lost");
-    }
-  }, heartbeatIntervalMs);
+  let heartbeatStopped = false;
+  let heartbeatPending = Promise.resolve();
+  let heartbeat: ReturnType<typeof setTimeout>;
+  const scheduleHeartbeat = () => {
+    heartbeat = setTimeout(() => {
+      heartbeatPending = (async () => {
+        try {
+          const renewed = await heartbeatLease(options.database, {
+            workerId: claim.workerId, runId: claim.runId, now: now(), leaseDurationMs,
+          });
+          if (!renewed) throw new Error("Worker lease was lost");
+        } catch {
+          leaseLost = true;
+          controller.abort("worker_lease_lost");
+        }
+        if (!heartbeatStopped && !leaseLost) scheduleHeartbeat();
+      })();
+    }, heartbeatIntervalMs);
+  };
+  const stopHeartbeat = async () => {
+    heartbeatStopped = true;
+    clearTimeout(heartbeat);
+    await heartbeatPending;
+  };
+  scheduleHeartbeat();
 
   try {
     const outcome = await options.execute(claim.runId, controller.signal);
+    await stopHeartbeat();
     const state = controller.signal.aborted ? "cancelled" : outcome.state;
     const finalized =
       !leaseLost &&
-      finishClaimedRun(options.database, {
+      (await finishClaimedRun(options.database, {
         workerId: claim.workerId,
         runId: claim.runId,
         nextState: state,
         now: now(),
-      });
+      }));
     return { runId: claim.runId, state, finalized };
   } catch {
+    await stopHeartbeat();
     const state: WorkerOutcomeState = controller.signal.aborted ? "cancelled" : "failed";
     const finalized =
       !leaseLost &&
-      finishClaimedRun(options.database, {
+      (await finishClaimedRun(options.database, {
         workerId: claim.workerId,
         runId: claim.runId,
         nextState: state,
         now: now(),
-      });
+      }));
     return { runId: claim.runId, state, finalized };
   } finally {
-    clearInterval(heartbeat);
+    await stopHeartbeat();
     options.signal?.removeEventListener("abort", forwardAbort);
   }
 }
@@ -119,10 +134,10 @@ function waitForPoll(milliseconds: number, signal: AbortSignal): Promise<void> {
 }
 
 export interface StartWorkerOptions {
-  databasePath: string;
+  databaseUrl: string;
   workerId: string;
   execute: JobExecutor;
-  reconcileExpiredLease?: (lease: NonNullable<ReturnType<ReturnType<typeof createRepositories>["leases"]["get"]>>) => Promise<boolean>;
+  reconcileExpiredLease?: (lease: NonNullable<Awaited<ReturnType<ReturnType<typeof createRepositories>["leases"]["get"]>>>) => Promise<boolean>;
   now?: () => string;
   leaseDurationMs?: number;
   heartbeatIntervalMs?: number;
@@ -134,27 +149,27 @@ export interface WorkerProcessHandle {
   completion: Promise<void>;
 }
 
-export function startWorkerProcess(options: StartWorkerOptions): WorkerProcessHandle {
-  const database = openDatabase(options.databasePath);
+export async function startWorkerProcess(options: StartWorkerOptions): Promise<WorkerProcessHandle> {
+  const database = (await openDatabase(options.databaseUrl));
   const controller = new AbortController();
   const now = options.now ?? (() => new Date().toISOString());
   const pollIntervalMs = options.pollIntervalMs ?? 1000;
   if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 1) {
-    database.close();
+    (await database.close());
     throw new Error("Poll interval must be a positive integer");
   }
 
   const completion = (async () => {
     try {
       while (!controller.signal.aborted) {
-        const staleLease = createRepositories(database).leases.get();
+        const staleLease = (await createRepositories(database).leases.get());
         if (staleLease && Date.parse(staleLease.expiresAt) <= Date.parse(now())) {
           const sandboxReconciled =
             (await options.reconcileExpiredLease?.(staleLease)) ?? false;
-          recoverExpiredLease(database, {
+          (await recoverExpiredLease(database, {
             now: now(),
             sandboxReconciled,
-          });
+          }));
         }
         if (controller.signal.aborted) break;
 
@@ -170,7 +185,7 @@ export function startWorkerProcess(options: StartWorkerOptions): WorkerProcessHa
         if (!result) await waitForPoll(pollIntervalMs, controller.signal);
       }
     } finally {
-      database.close();
+      (await database.close());
     }
   })();
 

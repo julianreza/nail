@@ -22,19 +22,19 @@ const proposal: ModelPlanProposal = {
   }],
 };
 
-function setup(options: { authenticated?: boolean } = {}) {
+async function setup(options: { authenticated?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "nail-run-handler-"));
   roots.push(root);
-  const databasePath = join(root, "app.sqlite");
-  const database = openDatabase(databasePath);
+  const databaseUrl = join(root, "app-database");
+  const database = (await openDatabase(databaseUrl));
   const repos = createRepositories(database);
-  repos.projects.create({ id: "project-1", name: "Nail" });
-  repos.agents.create({ id: "engineer-1", projectId: "project-1", name: "Engineer", role: "engineer" });
-  repos.providers.create({
+  (await repos.projects.create({ id: "project-1", name: "Nail" }));
+  (await repos.agents.create({ id: "engineer-1", projectId: "project-1", name: "Engineer", role: "engineer" }));
+  (await repos.providers.create({
     id: "deepseek-1", name: "DeepSeek", kind: "deepseek", status: "ready",
     model: "deepseek-chat", authMode: "api_key", secretReference: "secret:ref",
-  });
-  database.close();
+  }));
+  (await database.close());
 
   const handler = createRunRequestHandler({
     auth: {
@@ -43,14 +43,14 @@ function setup(options: { authenticated?: boolean } = {}) {
         : Response.json({ authenticated: true }),
     },
     appOrigin: origin,
-    databasePath,
+    databaseUrl,
     policy: {
       allowedTools: ["workspace:read"],
       allowedPermissions: ["workspace:read"],
     },
     createPlanGenerator: () => async () => proposal,
   });
-  return { databasePath, handler };
+  return { databaseUrl, handler };
 }
 
 const body = {
@@ -78,23 +78,23 @@ afterEach(() => {
 
 describe("owner-only project run requests", () => {
   it("creates a provider-generated plan that stops at owner approval", async () => {
-    const context = setup();
+    const context = (await setup());
     const response = await context.handler("project-1", post(body));
     const result = await response.json() as { runId: string; plan: unknown; approval: { decision: string } };
-    const database = openDatabase(context.databasePath);
+    const database = (await openDatabase(context.databaseUrl));
     try {
       expect(response.status, JSON.stringify(result)).toBe(201);
       expect(result.approval.decision).toBe("pending");
-      expect(createRepositories(database).runs.getById(result.runId)?.state).toBe("awaiting_approval");
+      expect((await createRepositories(database).runs.getById(result.runId))?.state).toBe("awaiting_approval");
       expect(JSON.stringify(result)).not.toContain("secret:ref");
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
   it("runs the same valid request through the domain before the HTTP wrapper", async () => {
-    const context = setup();
-    const database = openDatabase(context.databasePath);
+    const context = (await setup());
+    const database = (await openDatabase(context.databaseUrl));
     try {
       const result = await createRunPlanFromGoal(database, { ...body, projectId: "project-1" }, {
         allowedTools: ["workspace:read"],
@@ -102,22 +102,22 @@ describe("owner-only project run requests", () => {
       }, async () => proposal);
       expect(result.approval.decision).toBe("pending");
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
   it("rejects unauthenticated, cross-origin and malformed requests before creating a run", async () => {
-    const unauthenticated = setup({ authenticated: false });
+    const unauthenticated = (await setup({ authenticated: false }));
     expect((await unauthenticated.handler("project-1", post(body))).status).toBe(401);
 
-    const wrongOrigin = setup();
+    const wrongOrigin = (await setup());
     expect((await wrongOrigin.handler("project-1", post(body, "https://evil.invalid"))).status).toBe(403);
 
-    const zeroToolCalls = setup();
+    const zeroToolCalls = (await setup());
     expect((await zeroToolCalls.handler("project-1", post({ ...body, maxToolCalls: 0 }))).status).toBe(400);
-    const malformed = setup();
+    const malformed = (await setup());
     expect((await malformed.handler("project-1", post("{bad-json"))).status).toBe(400);
-    const extraField = setup();
+    const extraField = (await setup());
     expect((await extraField.handler("project-1", post({ ...body, command: "whoami" }))).status).toBe(400);
   });
 });

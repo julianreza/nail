@@ -28,7 +28,8 @@ function setup() {
       OPENAI_API_KEY: "must-not-reach-child",
       ANTHROPIC_API_KEY: "must-not-reach-child",
       GEMINI_API_KEY: "must-not-reach-child",
-      NAIL_DATABASE_PATH: "must-not-reach-child",
+      DATABASE_URL: "must-not-reach-child",
+      DATABASE_CA_CERT_PATH: "must-not-reach-child",
       NODE_OPTIONS: "--require=must-not-reach-child",
       HTTPS_PROXY: "https://must-not-reach-child.invalid",
     },
@@ -60,7 +61,8 @@ describe("bounded provider subprocess", () => {
     expect(output.env.OPENAI_API_KEY).toBeUndefined();
     expect(output.env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(output.env.GEMINI_API_KEY).toBeUndefined();
-    expect(output.env.NAIL_DATABASE_PATH).toBeUndefined();
+    expect(output.env.DATABASE_URL).toBeUndefined();
+    expect(output.env.DATABASE_CA_CERT_PATH).toBeUndefined();
     expect(output.env.NODE_OPTIONS).toBeUndefined();
     expect(output.env.HTTPS_PROXY).toBeUndefined();
   });

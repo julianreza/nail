@@ -17,7 +17,7 @@ export async function POST(
     const { approvalId } = await params;
     return createApprovalDecisionHandler(
       auth,
-      process.env.NAIL_DATABASE_PATH,
+      process.env.DATABASE_URL,
       process.env.APP_ORIGIN,
       allowedRunPermissionsFromEnvironment(),
     )(approvalId, request);

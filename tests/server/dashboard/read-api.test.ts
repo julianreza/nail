@@ -8,10 +8,10 @@ import { createDashboardReadHandlers } from "../../../lib/server/dashboard/read-
 
 const temporaryDirectories: string[] = [];
 
-function createDatabasePath(): string {
+function createDatabaseIdentity(): string {
   const directory = mkdtempSync(join(tmpdir(), "nail-dashboard-test-"));
   temporaryDirectories.push(directory);
-  return join(directory, "orchestrator.sqlite");
+  return join(directory, "orchestrator-database");
 }
 
 afterEach(() => {
@@ -20,7 +20,7 @@ afterEach(() => {
   }
 });
 
-async function createAuthenticatedHandlers(databasePath?: string) {
+async function createAuthenticatedHandlers(databaseUrl?: string) {
   const auth = createAuthHandlers({
     ownerPasswordHash: await hashOwnerPassword("correct horse battery", {
       salt: Buffer.alloc(16, 3),
@@ -41,7 +41,7 @@ async function createAuthenticatedHandlers(databasePath?: string) {
   );
   const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
   return {
-    handlers: createDashboardReadHandlers(auth, databasePath),
+    handlers: createDashboardReadHandlers(auth, databaseUrl),
     request: (path: string) =>
       new Request(`https://nail.example${path}`, { headers: { cookie } }),
   };
@@ -49,7 +49,7 @@ async function createAuthenticatedHandlers(databasePath?: string) {
 
 describe("authenticated dashboard read APIs", () => {
   it("rejects unauthenticated requests before touching the database", async () => {
-    const path = createDatabasePath();
+    const path = createDatabaseIdentity();
     const handlers = createDashboardReadHandlers(
       {
         protectedResource: async () =>
@@ -73,7 +73,7 @@ describe("authenticated dashboard read APIs", () => {
   });
 
   it("returns real zero counts and empty lists for a fresh database", async () => {
-    const { handlers, request } = await createAuthenticatedHandlers(createDatabasePath());
+    const { handlers, request } = await createAuthenticatedHandlers(createDatabaseIdentity());
     const overview = await handlers.overview(request("/api/overview"));
     const projects = await handlers.projects(request("/api/projects"));
 
@@ -88,12 +88,12 @@ describe("authenticated dashboard read APIs", () => {
     expect(await projects.json()).toEqual([]);
   });
 
-  it("returns counts and records from SQLite without exposing provider secret references", async () => {
-    const path = createDatabasePath();
-    const database = openDatabase(path);
+  it("returns counts and records from PostgreSQL without exposing provider secret references", async () => {
+    const path = createDatabaseIdentity();
+    const database = (await openDatabase(path));
     const repositories = createRepositories(database);
-    repositories.projects.create({ id: "project-1", name: "Nail" });
-    repositories.providers.create({
+    (await repositories.projects.create({ id: "project-1", name: "Nail" }));
+    (await repositories.providers.create({
       id: "provider-1",
       name: "DeepSeek",
       kind: "deepseek",
@@ -101,20 +101,20 @@ describe("authenticated dashboard read APIs", () => {
       authMode: "api_key",
       secretReference: "vault://private/provider-key",
       capabilities: ["tools"],
-    });
-    repositories.providers.create({
+    }));
+    (await repositories.providers.create({
       id: "provider-2",
       name: "Codex Subscription",
       kind: "codex",
       status: "unavailable",
       authMode: "subscription_cli",
-    });
-    repositories.accountBindings.create({
+    }));
+    (await repositories.accountBindings.create({
       providerId: "provider-2",
       bindingId: "codex-owner",
       state: "unsupported",
-    });
-    repositories.accountBindings.updateDiagnostic({
+    }));
+    (await repositories.accountBindings.updateDiagnostic({
       providerId: "provider-2",
       bindingId: "codex-owner",
       expectedRevision: 0,
@@ -122,32 +122,32 @@ describe("authenticated dashboard read APIs", () => {
       state: "unsupported",
       reason: "auth_status_unverified",
       checkedAt: "2026-10-20T00:00:00.000Z",
-    });
-    repositories.agents.create({
+    }));
+    (await repositories.agents.create({
       id: "agent-1",
       projectId: "project-1",
       providerId: "provider-1",
       name: "FE",
       role: "frontend",
-    });
-    repositories.runs.create({
+    }));
+    (await repositories.runs.create({
       id: "run-1",
       projectId: "project-1",
       state: "running",
-    });
-    repositories.tasks.create({
+    }));
+    (await repositories.tasks.create({
       id: "task-1",
       runId: "run-1",
       title: "Build shell",
       state: "running",
-    });
-    repositories.approvals.create({
+    }));
+    (await repositories.approvals.create({
       id: "approval-1",
       runId: "run-1",
       payloadFingerprint: "fingerprint",
       decision: "pending",
-    });
-    database.close();
+    }));
+    (await database.close());
 
     const { handlers, request } = await createAuthenticatedHandlers(path);
     const overview = await handlers.overview(request("/api/overview"));

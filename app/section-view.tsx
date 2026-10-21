@@ -166,7 +166,7 @@ export default function SectionView({ kind }: { kind: SectionKind }) {
             <p>{error}</p>
             {error === "Database is not configured" ? (
               <p className="setup-hint">
-                Set <code>NAIL_DATABASE_PATH</code> ke lokasi SQLite persisten.
+                Set <code>DATABASE_URL</code> server ke koneksi PostgreSQL Supabase.
               </p>
             ) : null}
           </div>

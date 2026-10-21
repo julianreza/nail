@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "../db/database";
 import type { ConnectionDiagnostic, SubscriptionBindingDescriptor, SubscriptionProviderKind, SubscriptionConnectorControl } from "../../domain/subscription-provider";
 import { isSameOriginRequest } from "../auth/auth-service";
 import { openDatabase, withTransaction } from "../db/database";
@@ -22,7 +22,7 @@ interface AuthGuard {
 interface SubscriptionHandlerDependencies {
   auth: AuthGuard;
   appOrigin: string | undefined;
-  databasePath: string | undefined;
+  databaseUrl: string | undefined;
   connector: SubscriptionConnectorControl;
   clock?: () => string;
 }
@@ -107,7 +107,7 @@ async function authorizedRequest(
   if (request.headers.get("content-type")?.split(";")[0] !== "application/json") {
     return json({ error: "Unsupported content type" }, 415);
   }
-  if (!dependencies.databasePath) return json({ error: "Provider service is not configured" }, 503);
+  if (!dependencies.databaseUrl) return json({ error: "Provider service is not configured" }, 503);
   return null;
 }
 
@@ -190,26 +190,26 @@ export function createSubscriptionProviderHandler(dependencies: SubscriptionHand
       return json({ error: "Provider binding does not match administrator configuration" }, 400);
     }
 
-    let database: DatabaseSync | undefined;
+    let database: Database | undefined;
     try {
-      database = openDatabase(dependencies.databasePath!);
+      database = (await openDatabase(dependencies.databaseUrl!));
       const repositories = createRepositories(database);
-      const created = withTransaction(database, () => {
-        let provider = repositories.providers.list().find((candidate) =>
+      const created = (await withTransaction(database, async () => {
+        let provider = (await repositories.providers.list()).find((candidate) =>
           candidate.kind === binding.kind && candidate.authMode === "subscription_cli"
         ) ?? null;
-        let accountBinding: ReturnType<typeof repositories.accountBindings.getByProviderId>;
+        let accountBinding: Awaited<ReturnType<typeof repositories.accountBindings.getByProviderId>>;
         if (provider) {
-          accountBinding = repositories.accountBindings.getByProviderId(provider.id);
+          accountBinding = (await repositories.accountBindings.getByProviderId(provider.id));
           if (accountBinding || provider.status !== "not_configured" || provider.secretReference !== null) {
             throw new SubscriptionProviderError("busy");
           }
-          if (!repositories.providers.updateSubscriptionConfiguration(provider.id, binding.model)) {
+          if (!(await repositories.providers.updateSubscriptionConfiguration(provider.id, binding.model))) {
             throw new SubscriptionProviderError("wrong_auth_mode");
           }
-          provider = repositories.providers.getById(provider.id)!;
+          provider = (await repositories.providers.getById(provider.id))!;
         } else {
-          provider = repositories.providers.create({
+          provider = (await repositories.providers.create({
             id: randomUUID(),
             name: KIND_NAME[binding.kind],
             kind: binding.kind,
@@ -217,15 +217,15 @@ export function createSubscriptionProviderHandler(dependencies: SubscriptionHand
             model: binding.model,
             authMode: "subscription_cli",
             capabilities: [],
-          });
+          }));
         }
-        accountBinding = repositories.accountBindings.create({
+        accountBinding = (await repositories.accountBindings.create({
           providerId: provider.id,
           bindingId: binding.bindingId,
           state: "not_installed",
-        });
+        }));
         return { provider, accountBinding };
-      });
+      }));
 
       let diagnostic: ConnectionDiagnostic;
       try {
@@ -236,8 +236,8 @@ export function createSubscriptionProviderHandler(dependencies: SubscriptionHand
       } catch (error) {
         diagnostic = diagnosticFromError(binding, error, (dependencies.clock ?? (() => new Date().toISOString()))());
       }
-      withTransaction(database, () => {
-        const updated = repositories.accountBindings.updateDiagnostic({
+      (await withTransaction(database, async () => {
+        const updated = (await repositories.accountBindings.updateDiagnostic({
           providerId: created.provider.id,
           bindingId: binding.bindingId,
           expectedRevision: created.accountBinding.revision,
@@ -245,17 +245,17 @@ export function createSubscriptionProviderHandler(dependencies: SubscriptionHand
           state: diagnostic.state,
           reason: diagnostic.reason,
           checkedAt: diagnostic.checkedAt,
-        });
+        }));
         if (!updated) throw new SubscriptionProviderError("invalid_binding");
-        repositories.providers.updateStatus(created.provider.id, providerStatus(diagnostic.state));
-      });
-      const finalProvider = repositories.providers.getById(created.provider.id)!;
+        (await repositories.providers.updateStatus(created.provider.id, providerStatus(diagnostic.state)));
+      }));
+      const finalProvider = (await repositories.providers.getById(created.provider.id))!;
       return json({ provider: safeProvider(finalProvider), connection: diagnostic }, 201);
     } catch (error) {
       if (error instanceof SubscriptionProviderError) return json({ error: error.message, code: error.code }, error.status);
       return json({ error: "Provider setup is unavailable" }, 503);
     } finally {
-      database?.close();
+      (await database?.close());
     }
   };
 }
@@ -268,16 +268,16 @@ export function createProviderConnectionHandler(dependencies: SubscriptionHandle
     if (body instanceof Response) return body;
     if (body.action !== "check" && body.action !== "disconnect") return json({ error: "Invalid request" }, 400);
 
-    let database: DatabaseSync | undefined;
+    let database: Database | undefined;
     try {
-      database = openDatabase(dependencies.databasePath!);
+      database = (await openDatabase(dependencies.databaseUrl!));
       const repositories = createRepositories(database);
-      const provider = repositories.providers.getById(providerId);
+      const provider = (await repositories.providers.getById(providerId));
       if (!provider) return json({ error: "Provider not found" }, 404);
       if (provider.authMode !== "subscription_cli" || provider.kind === null || provider.kind === "deepseek") {
         return json({ error: "Provider account binding is invalid" }, 400);
       }
-      const binding = repositories.accountBindings.getByProviderId(providerId);
+      const binding = (await repositories.accountBindings.getByProviderId(providerId));
       if (!binding) return json({ error: "Provider binding not found" }, 404);
       let bindingList: SubscriptionBindingDescriptor[];
       try {
@@ -295,16 +295,16 @@ export function createProviderConnectionHandler(dependencies: SubscriptionHandle
         await dependencies.connector.cancel(binding.bindingId, AbortSignal.timeout(5_000)).catch(() => {
           throw new SubscriptionProviderError("unavailable");
         });
-        withTransaction(database, () => {
-          if (repositories.providers.advanceBindingGeneration(providerId) === null) {
+        (await withTransaction(database, async () => {
+          if ((await repositories.providers.advanceBindingGeneration(providerId)) === null) {
             throw new SubscriptionProviderError("wrong_auth_mode");
           }
-          if (!repositories.accountBindings.delete(providerId)) {
+          if (!(await repositories.accountBindings.delete(providerId))) {
             throw new SubscriptionProviderError("invalid_binding");
           }
-          repositories.providers.updateStatus(providerId, "not_configured");
-        });
-        return json({ provider: safeProvider(repositories.providers.getById(providerId)!), disconnected: true }, 200);
+          (await repositories.providers.updateStatus(providerId, "not_configured"));
+        }));
+        return json({ provider: safeProvider((await repositories.providers.getById(providerId))!), disconnected: true }, 200);
       }
 
       let diagnostic: ConnectionDiagnostic;
@@ -316,8 +316,8 @@ export function createProviderConnectionHandler(dependencies: SubscriptionHandle
       } catch (error) {
         diagnostic = diagnosticFromError(configuredBinding, error, (dependencies.clock ?? (() => new Date().toISOString()))());
       }
-      const updated = withTransaction(database, () => {
-        const changed = repositories.accountBindings.updateDiagnostic({
+      const updated = (await withTransaction(database, async () => {
+        const changed = (await repositories.accountBindings.updateDiagnostic({
           providerId,
           bindingId: binding.bindingId,
           expectedRevision: binding.revision,
@@ -325,18 +325,18 @@ export function createProviderConnectionHandler(dependencies: SubscriptionHandle
           state: diagnostic.state,
           reason: diagnostic.reason,
           checkedAt: diagnostic.checkedAt,
-        });
+        }));
         if (!changed) return false;
-        repositories.providers.updateStatus(providerId, providerStatus(diagnostic.state));
+        (await repositories.providers.updateStatus(providerId, providerStatus(diagnostic.state)));
         return true;
-      });
+      }));
       if (!updated) return json({ error: "Provider binding changed during check" }, 409);
-      return json({ provider: safeProvider(repositories.providers.getById(providerId)!), connection: diagnostic }, 200);
+      return json({ provider: safeProvider((await repositories.providers.getById(providerId))!), connection: diagnostic }, 200);
     } catch (error) {
       if (error instanceof SubscriptionProviderError) return json({ error: error.message, code: error.code }, error.status);
       return json({ error: "Provider connection check is unavailable" }, 503);
     } finally {
-      database?.close();
+      (await database?.close());
     }
   };
 }

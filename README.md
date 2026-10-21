@@ -37,13 +37,27 @@ Build the explicit `app` and `connector` Docker targets and run the disposable i
 
 ## API provider secret storage
 
-The server-side provider adapter reads encrypted API keys through `EncryptedSecretStore`; keys are not stored in SQLite or returned to the browser/sandbox. Before configuring a provider, set `NAIL_SECRET_DIR` to a private persistent directory and create a separate 32-byte key with `node scripts/generate-encryption-key.mjs`; keep that key in server-only runtime configuration (a mounted secret for the app container), never in an image or an untrusted execution container. The Providers page can configure one DeepSeek API-key provider. Nail checks the key against DeepSeek's `/models` endpoint before saving; the selected model must be returned by that request. Keys are encrypted and stored separately from SQLite, and neither the key nor its secret reference is returned to the browser. Local automated tests use a stubbed provider response; live credentials have not been tested.
+The server-side provider adapter reads encrypted API keys through `EncryptedSecretStore`; keys are not stored in PostgreSQL or returned to the browser/sandbox. Before configuring a provider, set `NAIL_SECRET_DIR` to a private persistent directory and create a separate 32-byte key with `node scripts/generate-encryption-key.mjs`; keep that key in server-only runtime configuration (a mounted secret for the app container), never in an image or an untrusted execution container. The Providers page can configure one DeepSeek API-key provider. Nail checks the key against DeepSeek's `/models` endpoint before saving; the selected model must be returned by that request. Keys are encrypted and stored separately from PostgreSQL, and neither the key nor its secret reference is returned to the browser. Local automated tests use a stubbed provider response; live credentials have not been tested.
 
 The Providers page also shows owner-managed subscription account bindings for Antigravity, Codex, and Claude. The local connector is started separately with `bun run providers:connector`; set `NAIL_CONNECTOR_SOCKET` and `NAIL_CONNECTOR_BINDINGS_FILE` in its environment and follow `docs/providers/subscription-accounts.md`. Current account adapters are fail-closed: CLIs are not installed on the development host, Claude policy is unverified, and no subscription adapter is enabled for plan generation until authentication, tool isolation, and output-budget controls are verified. Do not treat a saved binding or fixture test as a successful vendor login or live model request.
 
-## SQLite persistence
+## Supabase PostgreSQL persistence
 
-Server data uses the built-in `node:sqlite` driver, verified with Bun 1.4.3 and the installed Node runtime. Set `NAIL_DATABASE_PATH` to an absolute SQLite file path on persistent storage (for example, `/var/lib/nail/orchestrator.sqlite`). `openDatabase(path)` creates the file's parent directory, enables WAL and foreign keys, applies versioned migrations, and restricts the database file to owner read/write (`0600`). Do not use `:memory:` for application data. API keys and provider auth tokens are not stored in this database.
+Server data uses async `pg` through a server-only `DATABASE_URL`. Copy `.env.example` to your ignored `.env.local`, then supply the PostgreSQL connection string from your own Supabase project's Connect dialog. Use the direct endpoint or session pooler, not the transaction pooler, with the database-owning login. Never prefix the URL with `NEXT_PUBLIC_`, pass it to the private provider connector/sandbox, or use a Supabase browser/service-role API key as a database password.
+
+Remote connections require certificate-verified TLS, including when the URL says `sslmode=require`. If your endpoint uses a private CA, mount its trusted certificate and set `DATABASE_CA_CERT_PATH`; do not disable verification. Plaintext is allowed only for loopback local PostgreSQL. See [PostgreSQL operations](docs/postgresql.md) for setup, migrations, connection limits, and backup guidance.
+
+`await openDatabase(url)` initializes lazily on the server and applies versioned schema migrations under a PostgreSQL transaction/advisory lock. All repositories and consumers are async. Multi-repository mutations reserve one connection through commit/rollback; a transaction-scoped global lock preserves Nail's serial queue, approval, task and usage-budget invariants across web/worker processes. Tables use native constraints and timestamps, and Supabase API roles have no access to owner data. Builds require no database credentials or connectivity. There is no old-data import or local-file persistence fallback; this is a fresh database cutover.
+
+### Checks with disposable PostgreSQL
+
+```sh
+bun run test:postgres  # starts and removes a uniquely named local PostgreSQL 17 Docker container
+bun run lint
+bun run build         # no DATABASE_URL needed
+```
+
+Alternatively explicitly set `NAIL_TEST_DATABASE_URL` to a disposable PostgreSQL database and run `bun run test`. Tests create/drop isolated schemas and must never target production or an unknown Supabase project. `test:postgres` overrides any inherited test URL with its own local container. The opt-in real-database regressions cover concurrent migrations, async rollback/connection ownership, queue claims, approval decisions, and budget reservations. Vitest and ESLint exclude sibling `.worktrees` rather than running/checking their stale copies. The separate live sandbox test remains opt-in.
 
 ## Sandbox status
 

@@ -1,4 +1,5 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "./database";
+import { withTransaction } from "./database";
 import type { ProviderStatus } from "../../domain/provider-status";
 import type { ConnectionState, SubscriptionProviderKind } from "../../domain/subscription-provider";
 import type { RunState } from "../../domain/run-state";
@@ -197,35 +198,35 @@ function mapRow<T>(row: unknown): T {
   return mapped as T;
 }
 
-function findById<T>(
-  database: DatabaseSync,
+async function findById<T>(
+  database: Database,
   table: string,
   id: string,
-): T | null {
-  const row = database.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
+): Promise<T | null> {
+  const row = (await database.prepare(`SELECT * FROM ${table} WHERE id = $1`).get(id));
   return row === undefined ? null : mapRow<T>(row);
 }
 
-function listRecords<T>(database: DatabaseSync, table: string): T[] {
-  return database
+async function listRecords<T>(database: Database, table: string): Promise<T[]> {
+  return (await database
     .prepare(`SELECT * FROM ${table} ORDER BY created_at DESC, id DESC`)
-    .all()
+    .all())
     .map((row) => mapRow<T>(row));
 }
 
-export function createRepositories(database: DatabaseSync) {
+export function createRepositories(database: Database) {
   const projects = {
-    create(input: {
+    async create(input: {
       id: string;
       name: string;
       repoUrl?: string | null;
       baselineRef?: string | null;
       baselineCommit?: string | null;
-    }): ProjectRecord {
-      database
+    }): Promise<ProjectRecord> {
+      (await database
         .prepare(
           `INSERT INTO projects (id, name, repo_url, baseline_ref, baseline_commit)
-           VALUES (?, ?, ?, ?, ?)`,
+           VALUES ($1, $2, $3, $4, $5)`,
         )
         .run(
           input.id,
@@ -233,30 +234,30 @@ export function createRepositories(database: DatabaseSync) {
           input.repoUrl ?? null,
           input.baselineRef ?? null,
           input.baselineCommit ?? null,
-        );
-      return findById<ProjectRecord>(database, "projects", input.id)!;
+        ));
+      return (await findById<ProjectRecord>(database, "projects", input.id))!;
     },
-    getById(id: string): ProjectRecord | null {
-      return findById(database, "projects", id);
+    async getById(id: string): Promise<ProjectRecord | null> {
+      return (await findById(database, "projects", id));
     },
-    list(): ProjectRecord[] {
-      return listRecords(database, "projects");
+    async list(): Promise<ProjectRecord[]> {
+      return (await listRecords(database, "projects"));
     },
   };
 
   const agents = {
-    create(input: {
+    async create(input: {
       id: string;
       projectId?: string | null;
       providerId?: string | null;
       name: string;
       role: string;
       instructions?: string;
-    }): AgentRecord {
-      database
+    }): Promise<AgentRecord> {
+      (await database
         .prepare(
           `INSERT INTO agents (id, project_id, provider_id, name, role, instructions)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+           VALUES ($1, $2, $3, $4, $5, $6)`,
         )
         .run(
           input.id,
@@ -265,19 +266,19 @@ export function createRepositories(database: DatabaseSync) {
           input.name,
           input.role,
           input.instructions ?? "",
-        );
-      return findById<AgentRecord>(database, "agents", input.id)!;
+        ));
+      return (await findById<AgentRecord>(database, "agents", input.id))!;
     },
-    getById(id: string): AgentRecord | null {
-      return findById(database, "agents", id);
+    async getById(id: string): Promise<AgentRecord | null> {
+      return (await findById(database, "agents", id));
     },
-    list(): AgentRecord[] {
-      return listRecords(database, "agents");
+    async list(): Promise<AgentRecord[]> {
+      return (await listRecords(database, "agents"));
     },
   };
 
   const providers = {
-    create(input: {
+    async create(input: {
       id: string;
       name: string;
       kind?: ProviderKind | null;
@@ -286,16 +287,16 @@ export function createRepositories(database: DatabaseSync) {
       authMode: ProviderAuthMode;
       secretReference?: string | null;
       capabilities?: string[];
-    }): ProviderRecord {
+    }): Promise<ProviderRecord> {
       const kind = input.kind ?? null;
       const secretReference = input.secretReference ?? null;
       if (input.authMode === "subscription_cli" && (!kind || secretReference !== null)) {
         throw new Error("Subscription providers require a kind and must not store a secret reference");
       }
-      database
+      (await database
         .prepare(
           `INSERT INTO providers (id, name, kind, status, model, auth_mode, secret_reference, capabilities_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         )
         .run(
           input.id,
@@ -306,45 +307,45 @@ export function createRepositories(database: DatabaseSync) {
           input.authMode,
           secretReference,
           JSON.stringify(input.capabilities ?? []),
-        );
-      return this.getById(input.id)!;
+        ));
+      return (await this.getById(input.id))!;
     },
-    getById(id: string): ProviderRecord | null {
-      const record = findById<Omit<ProviderRecord, "capabilities"> & { capabilitiesJson: string }>(
+    async getById(id: string): Promise<ProviderRecord | null> {
+      const record = (await findById<Omit<ProviderRecord, "capabilities"> & { capabilitiesJson: string }>(
         database,
         "providers",
         id,
-      );
+      ));
       if (!record) return null;
       const { capabilitiesJson, ...provider } = record;
       return { ...provider, capabilities: JSON.parse(capabilitiesJson) as string[] };
     },
-    updateStatus(id: string, status: ProviderStatus): boolean {
+    async updateStatus(id: string, status: ProviderStatus): Promise<boolean> {
       return (
-        database.prepare("UPDATE providers SET status = ? WHERE id = ?").run(status, id)
+        (await database.prepare("UPDATE providers SET status = $1 WHERE id = $2").run(status, id))
           .changes === 1
       );
     },
-    advanceBindingGeneration(id: string): number | null {
-      const update = database.prepare(
+    async advanceBindingGeneration(id: string): Promise<number | null> {
+      const update = (await database.prepare(
         `UPDATE providers SET binding_generation = binding_generation + 1
-         WHERE id = ? AND auth_mode = 'subscription_cli' AND secret_reference IS NULL`,
-      ).run(id);
+         WHERE id = $1 AND auth_mode = 'subscription_cli' AND secret_reference IS NULL`,
+      ).run(id));
       if (update.changes !== 1) return null;
-      return this.getById(id)?.bindingGeneration ?? null;
+      return (await this.getById(id))?.bindingGeneration ?? null;
     },
-    updateSubscriptionConfiguration(id: string, model: string): boolean {
+    async updateSubscriptionConfiguration(id: string, model: string): Promise<boolean> {
       if (!model || model.length > 128) throw new Error("Provider model is invalid");
-      return database.prepare(
-        `UPDATE providers SET model = ?, status = 'unavailable'
-         WHERE id = ? AND auth_mode = 'subscription_cli'
+      return (await database.prepare(
+        `UPDATE providers SET model = $1, status = 'unavailable'
+         WHERE id = $2 AND auth_mode = 'subscription_cli'
            AND kind IS NOT NULL AND kind <> 'deepseek' AND secret_reference IS NULL`,
-      ).run(model, id).changes === 1;
+      ).run(model, id)).changes === 1;
     },
-    list(): ProviderRecord[] {
-      return listRecords<
+    async list(): Promise<ProviderRecord[]> {
+      return (await listRecords<
         Omit<ProviderRecord, "capabilities"> & { capabilitiesJson: string }
-      >(database, "providers").map(({ capabilitiesJson, ...provider }) => ({
+      >(database, "providers")).map(({ capabilitiesJson, ...provider }) => ({
         ...provider,
         capabilities: JSON.parse(capabilitiesJson) as string[],
       }));
@@ -352,15 +353,15 @@ export function createRepositories(database: DatabaseSync) {
   };
 
   const accountBindings = {
-    create(input: {
+    async create(input: {
       providerId: string;
       bindingId: string;
       state: ConnectionState;
-    }): ProviderAccountBindingRecord {
+    }): Promise<ProviderAccountBindingRecord> {
       if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(input.bindingId)) {
         throw new Error("Provider binding ID is invalid");
       }
-      const provider = providers.getById(input.providerId);
+      const provider = (await providers.getById(input.providerId));
       if (
         !provider ||
         provider.authMode !== "subscription_cli" ||
@@ -370,21 +371,21 @@ export function createRepositories(database: DatabaseSync) {
       ) {
         throw new Error("Subscription binding requires a secret-free subscription provider");
       }
-      database.prepare(
+      (await database.prepare(
         `INSERT INTO provider_account_bindings (provider_id, binding_id, state, revision, generation)
-         VALUES (?, ?, ?, 0, ?)`,
-      ).run(input.providerId, input.bindingId, input.state, provider.bindingGeneration);
-      return this.getByProviderId(input.providerId)!;
+         VALUES ($1, $2, $3, 0, $4)`,
+      ).run(input.providerId, input.bindingId, input.state, provider.bindingGeneration));
+      return (await this.getByProviderId(input.providerId))!;
     },
-    getByProviderId(providerId: string): ProviderAccountBindingRecord | null {
-      const row = database.prepare(
-        `SELECT provider_id AS providerId, binding_id AS bindingId, state,
-                reason, checked_at AS checkedAt, generation, revision
-         FROM provider_account_bindings WHERE provider_id = ?`,
-      ).get(providerId);
+    async getByProviderId(providerId: string): Promise<ProviderAccountBindingRecord | null> {
+      const row = (await database.prepare(
+        `SELECT provider_id AS "providerId", binding_id AS "bindingId", state,
+                reason, checked_at AS "checkedAt", generation, revision
+         FROM provider_account_bindings WHERE provider_id = $1`,
+      ).get(providerId));
       return row === undefined ? null : mapRow<ProviderAccountBindingRecord>(row);
     },
-    updateDiagnostic(input: {
+    async updateDiagnostic(input: {
       providerId: string;
       bindingId: string;
       expectedRevision: number;
@@ -392,7 +393,7 @@ export function createRepositories(database: DatabaseSync) {
       state: ConnectionState;
       reason: string | null;
       checkedAt: string;
-    }): boolean {
+    }): Promise<boolean> {
       if (
         !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0 ||
         !Number.isSafeInteger(input.expectedGeneration) || input.expectedGeneration < 0 ||
@@ -401,14 +402,14 @@ export function createRepositories(database: DatabaseSync) {
       ) {
         throw new Error("Provider binding diagnostic is invalid");
       }
-      return database.prepare(
+      return (await database.prepare(
         `UPDATE provider_account_bindings
-         SET state = ?, reason = ?, checked_at = ?, revision = revision + 1
-         WHERE provider_id = ? AND binding_id = ? AND revision = ? AND generation = ?
+         SET state = $1, reason = $2, checked_at = $3, revision = revision + 1
+         WHERE provider_id = $4 AND binding_id = $5 AND revision = $6 AND generation = $7
            AND EXISTS (
              SELECT 1 FROM providers
              WHERE providers.id = provider_account_bindings.provider_id
-               AND providers.binding_generation = ?
+               AND providers.binding_generation = $8
            )`,
       ).run(
         input.state,
@@ -419,51 +420,51 @@ export function createRepositories(database: DatabaseSync) {
         input.expectedRevision,
         input.expectedGeneration,
         input.expectedGeneration,
-      ).changes === 1;
+      )).changes === 1;
     },
-    delete(providerId: string): boolean {
-      return database.prepare(
-        "DELETE FROM provider_account_bindings WHERE provider_id = ?",
-      ).run(providerId).changes === 1;
+    async delete(providerId: string): Promise<boolean> {
+      return (await database.prepare(
+        "DELETE FROM provider_account_bindings WHERE provider_id = $1",
+      ).run(providerId)).changes === 1;
     },
   };
 
   const conversations = {
-    create(input: {
+    async create(input: {
       id: string;
       projectId: string;
       runId?: string | null;
       actor: string;
       content: string;
-    }): ConversationRecord {
-      database
+    }): Promise<ConversationRecord> {
+      (await database
         .prepare(
           `INSERT INTO conversations (id, project_id, run_id, actor, content)
-           VALUES (?, ?, ?, ?, ?)`,
+           VALUES ($1, $2, $3, $4, $5)`,
         )
-        .run(input.id, input.projectId, input.runId ?? null, input.actor, input.content);
-      return findById<ConversationRecord>(database, "conversations", input.id)!;
+        .run(input.id, input.projectId, input.runId ?? null, input.actor, input.content));
+      return (await findById<ConversationRecord>(database, "conversations", input.id))!;
     },
-    getById(id: string): ConversationRecord | null {
-      return findById(database, "conversations", id);
+    async getById(id: string): Promise<ConversationRecord | null> {
+      return (await findById(database, "conversations", id));
     },
-    list(): ConversationRecord[] {
-      return listRecords(database, "conversations");
+    async list(): Promise<ConversationRecord[]> {
+      return (await listRecords(database, "conversations"));
     },
   };
 
   const runs = {
-    create(input: {
+    async create(input: {
       id: string;
       projectId: string;
       state: RunState;
       planVersion?: number;
       baselineCommit?: string | null;
-    }): RunRecord {
-      database
+    }): Promise<RunRecord> {
+      (await database
         .prepare(
           `INSERT INTO runs (id, project_id, state, plan_version, baseline_commit)
-           VALUES (?, ?, ?, ?, ?)`,
+           VALUES ($1, $2, $3, $4, $5)`,
         )
         .run(
           input.id,
@@ -471,30 +472,30 @@ export function createRepositories(database: DatabaseSync) {
           input.state,
           input.planVersion ?? 1,
           input.baselineCommit ?? null,
-        );
-      return findById<RunRecord>(database, "runs", input.id)!;
+        ));
+      return (await findById<RunRecord>(database, "runs", input.id))!;
     },
-    getById(id: string): RunRecord | null {
-      return findById(database, "runs", id);
+    async getById(id: string): Promise<RunRecord | null> {
+      return (await findById(database, "runs", id));
     },
-    list(): RunRecord[] {
-      return listRecords(database, "runs");
+    async list(): Promise<RunRecord[]> {
+      return (await listRecords(database, "runs"));
     },
   };
 
   const tasks = {
-    create(input: {
+    async create(input: {
       id: string;
       runId: string;
       ownerAgentId?: string | null;
       title: string;
       state?: string;
       position?: number;
-    }): TaskRecord {
-      database
+    }): Promise<TaskRecord> {
+      (await database
         .prepare(
           `INSERT INTO tasks (id, run_id, owner_agent_id, title, state, position)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+           VALUES ($1, $2, $3, $4, $5, $6)`,
         )
         .run(
           input.id,
@@ -503,52 +504,47 @@ export function createRepositories(database: DatabaseSync) {
           input.title,
           input.state ?? "queued",
           input.position ?? 0,
-        );
-      return findById<TaskRecord>(database, "tasks", input.id)!;
+        ));
+      return (await findById<TaskRecord>(database, "tasks", input.id))!;
     },
-    getById(id: string): TaskRecord | null {
-      return findById(database, "tasks", id);
+    async getById(id: string): Promise<TaskRecord | null> {
+      return (await findById(database, "tasks", id));
     },
-    list(): TaskRecord[] {
-      return listRecords(database, "tasks");
+    async list(): Promise<TaskRecord[]> {
+      return (await listRecords(database, "tasks"));
     },
-    listForRun(runId: string): TaskRecord[] {
-      return database
-        .prepare("SELECT * FROM tasks WHERE run_id = ? ORDER BY position ASC, id ASC")
-        .all(runId)
+    async listForRun(runId: string): Promise<TaskRecord[]> {
+      return (await database
+        .prepare("SELECT * FROM tasks WHERE run_id = $1 ORDER BY position ASC, id ASC")
+        .all(runId))
         .map((row) => mapRow<TaskRecord>(row));
     },
   };
 
   const taskDependencies = {
-    set(taskId: string, dependsOnTaskIds: readonly string[]): void {
+    async set(taskId: string, dependsOnTaskIds: readonly string[]): Promise<void> {
       const insert = database.prepare(
-        "INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES (?, ?)",
+        "INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES ($1, $2)",
       );
-      database.exec("BEGIN IMMEDIATE");
-      try {
-        database.prepare("DELETE FROM task_dependencies WHERE task_id = ?").run(taskId);
+      await withTransaction(database, async () => {
+        (await database.prepare("DELETE FROM task_dependencies WHERE task_id = $1").run(taskId));
         for (const dependencyId of dependsOnTaskIds) {
-          insert.run(taskId, dependencyId);
+          (await insert.run(taskId, dependencyId));
         }
-        database.exec("COMMIT");
-      } catch (error) {
-        database.exec("ROLLBACK");
-        throw error;
-      }
+      });
     },
-    listForTask(taskId: string): TaskDependencyRecord[] {
-      return database
+    async listForTask(taskId: string): Promise<TaskDependencyRecord[]> {
+      return (await database
         .prepare(
-          "SELECT task_id, depends_on_task_id FROM task_dependencies WHERE task_id = ? ORDER BY depends_on_task_id",
+          "SELECT task_id, depends_on_task_id FROM task_dependencies WHERE task_id = $1 ORDER BY depends_on_task_id",
         )
-        .all(taskId)
+        .all(taskId))
         .map((row) => mapRow<TaskDependencyRecord>(row));
     },
   };
 
   const approvals = {
-    create(input: {
+    async create(input: {
       id: string;
       runId: string;
       payloadFingerprint: string;
@@ -556,13 +552,13 @@ export function createRepositories(database: DatabaseSync) {
       planVersion?: number;
       baselineCommit?: string | null;
       scopeJson?: string;
-    }): ApprovalRecord {
-      database
+    }): Promise<ApprovalRecord> {
+      (await database
         .prepare(
           `INSERT INTO approvals (
              id, run_id, payload_fingerprint, decision, plan_version,
              baseline_commit, scope_json
-           ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         )
         .run(
           input.id,
@@ -572,102 +568,99 @@ export function createRepositories(database: DatabaseSync) {
           input.planVersion ?? 1,
           input.baselineCommit ?? null,
           input.scopeJson ?? "{}",
-        );
-      return findById<ApprovalRecord>(database, "approvals", input.id)!;
+        ));
+      return (await findById<ApprovalRecord>(database, "approvals", input.id))!;
     },
-    getById(id: string): ApprovalRecord | null {
-      return findById(database, "approvals", id);
+    async getById(id: string): Promise<ApprovalRecord | null> {
+      return (await findById(database, "approvals", id));
     },
-    listForRun(runId: string): ApprovalRecord[] {
-      return database
-        .prepare("SELECT * FROM approvals WHERE run_id = ? ORDER BY created_at DESC, id DESC")
-        .all(runId)
+    async listForRun(runId: string): Promise<ApprovalRecord[]> {
+      return (await database
+        .prepare("SELECT * FROM approvals WHERE run_id = $1 ORDER BY created_at DESC, id DESC")
+        .all(runId))
         .map((row) => mapRow<ApprovalRecord>(row));
     },
-    updateDecision(id: string, decision: ApprovalRecord["decision"]): boolean {
+    async updateDecision(id: string, decision: ApprovalRecord["decision"]): Promise<boolean> {
       return (
-        database
-          .prepare("UPDATE approvals SET decision = ? WHERE id = ? AND decision = 'pending'")
-          .run(decision, id).changes === 1
+        (await database
+          .prepare("UPDATE approvals SET decision = $1 WHERE id = $2 AND decision = 'pending'")
+          .run(decision, id)).changes === 1
       );
     },
-    list(): ApprovalRecord[] {
-      return listRecords(database, "approvals");
+    async list(): Promise<ApprovalRecord[]> {
+      return (await listRecords(database, "approvals"));
     },
   };
 
   const leases = {
-    acquire(input: {
+    async acquire(input: {
       workerId: string;
       runId: string;
       expiresAt: string;
       now: string;
-    }): boolean {
-      const result = database
+    }): Promise<boolean> {
+      const result = (await database
         .prepare(
           `INSERT INTO leases (singleton_id, worker_id, run_id, expires_at)
-           VALUES ('global', ?, ?, ?)
+           VALUES ('global', $1, $2, $3)
            ON CONFLICT(singleton_id) DO UPDATE SET
              worker_id = excluded.worker_id,
              run_id = excluded.run_id,
              expires_at = excluded.expires_at
-           WHERE leases.expires_at <= ?`,
+           WHERE leases.expires_at <= $4`,
         )
-        .run(input.workerId, input.runId, input.expiresAt, input.now);
+        .run(input.workerId, input.runId, input.expiresAt, input.now));
       return result.changes === 1;
     },
-    get(): LeaseRecord | null {
-      const row = database
+    async get(): Promise<LeaseRecord | null> {
+      const row = (await database
         .prepare(
           "SELECT worker_id, run_id, expires_at FROM leases WHERE singleton_id = 'global'",
         )
-        .get();
+        .get());
       return row === undefined ? null : mapRow<LeaseRecord>(row);
     },
-    release(workerId: string): boolean {
+    async release(workerId: string): Promise<boolean> {
       return (
-        database
-          .prepare("DELETE FROM leases WHERE singleton_id = 'global' AND worker_id = ?")
-          .run(workerId).changes === 1
+        (await database
+          .prepare("DELETE FROM leases WHERE singleton_id = 'global' AND worker_id = $1")
+          .run(workerId)).changes === 1
       );
     },
   };
 
   const events = {
-    append<TPayload>(input: {
+    async append<TPayload>(input: {
       runId: string;
       eventType: string;
       payload: TPayload;
-    }): EventRecord<TPayload> {
+    }): Promise<EventRecord<TPayload>> {
       const payloadJson = JSON.stringify(input.payload);
       if (payloadJson === undefined) {
         throw new Error("Event payload must be JSON serializable");
       }
-      const result = database
+      const row = await database
         .prepare(
-          "INSERT INTO events (run_id, event_type, payload_json) VALUES (?, ?, ?)",
+          "INSERT INTO events (run_id, event_type, payload_json) VALUES ($1, $2, $3) RETURNING *",
         )
-        .run(input.runId, input.eventType, payloadJson);
-      const row = database
-        .prepare("SELECT * FROM events WHERE id = ?")
-        .get(Number(result.lastInsertRowid));
+        .get(input.runId, input.eventType, payloadJson);
       const record = mapRow<Omit<EventRecord<TPayload>, "payload"> & { payloadJson: string }>(row);
       const { payloadJson: storedPayload, ...event } = record;
       return { ...event, payload: JSON.parse(storedPayload) as TPayload };
     },
-    listAfter<TPayload = unknown>(
+    async listAfter<TPayload = unknown>(
       runId: string,
       lastEventId: number,
       limit = 100,
-    ): EventRecord<TPayload>[] {
+    ): Promise<EventRecord<TPayload>[]> {
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) {
         throw new Error("Event page size must be between 1 and 1000");
       }
-      return database
+      return (await database
         .prepare(
-          `SELECT * FROM events WHERE run_id = ? AND id > ? ORDER BY id ASC LIMIT ?`,
+          `SELECT * FROM events WHERE run_id = $1 AND id > $2 ORDER BY id ASC LIMIT $3`,
         )
-        .all(runId, lastEventId, limit)
+        .all(runId, lastEventId, limit))
         .map((row) => {
           const record = mapRow<
             Omit<EventRecord<TPayload>, "payload"> & { payloadJson: string }
@@ -679,60 +672,60 @@ export function createRepositories(database: DatabaseSync) {
   };
 
   const qaResults = {
-    create(input: {
+    async create(input: {
       id: string;
       runId: string;
       taskId?: string | null;
       status: VerificationStatus;
       details?: string;
-    }): QaResultRecord {
-      database
+    }): Promise<QaResultRecord> {
+      (await database
         .prepare(
           `INSERT INTO qa_results (id, run_id, task_id, status, details)
-           VALUES (?, ?, ?, ?, ?)`,
+           VALUES ($1, $2, $3, $4, $5)`,
         )
-        .run(input.id, input.runId, input.taskId ?? null, input.status, input.details ?? "");
-      return findById<QaResultRecord>(database, "qa_results", input.id)!;
+        .run(input.id, input.runId, input.taskId ?? null, input.status, input.details ?? ""));
+      return (await findById<QaResultRecord>(database, "qa_results", input.id))!;
     },
-    getById(id: string): QaResultRecord | null {
-      return findById(database, "qa_results", id);
+    async getById(id: string): Promise<QaResultRecord | null> {
+      return (await findById(database, "qa_results", id));
     },
-    list(): QaResultRecord[] {
-      return listRecords(database, "qa_results");
+    async list(): Promise<QaResultRecord[]> {
+      return (await listRecords(database, "qa_results"));
     },
   };
 
   const artifacts = {
-    create(input: {
+    async create(input: {
       id: string;
       runId: string;
       kind: string;
       filePath: string;
       sizeBytes: number;
-    }): ArtifactRecord {
-      database
+    }): Promise<ArtifactRecord> {
+      (await database
         .prepare(
           `INSERT INTO artifacts (id, run_id, kind, file_path, size_bytes)
-           VALUES (?, ?, ?, ?, ?)`,
+           VALUES ($1, $2, $3, $4, $5)`,
         )
-        .run(input.id, input.runId, input.kind, input.filePath, input.sizeBytes);
-      return findById<ArtifactRecord>(database, "artifacts", input.id)!;
+        .run(input.id, input.runId, input.kind, input.filePath, input.sizeBytes));
+      return (await findById<ArtifactRecord>(database, "artifacts", input.id))!;
     },
-    getById(id: string): ArtifactRecord | null {
-      return findById(database, "artifacts", id);
+    async getById(id: string): Promise<ArtifactRecord | null> {
+      return (await findById(database, "artifacts", id));
     },
-    list(): ArtifactRecord[] {
-      return listRecords(database, "artifacts");
+    async list(): Promise<ArtifactRecord[]> {
+      return (await listRecords(database, "artifacts"));
     },
   };
 
-  function getWorkspaceById(id: string): WorkspaceRecord | null {
-    const workspace = findById<
+  async function getWorkspaceById(id: string): Promise<WorkspaceRecord | null> {
+    const workspace = (await findById<
       Omit<WorkspaceRecord, "setupCommands" | "verificationCommands"> & {
         setupCommandsJson: string;
         verificationCommandsJson: string;
       }
-    >(database, "run_workspaces", id);
+    >(database, "run_workspaces", id));
     if (!workspace) return null;
     const { setupCommandsJson, verificationCommandsJson, ...record } = workspace;
     return {
@@ -743,7 +736,7 @@ export function createRepositories(database: DatabaseSync) {
   }
 
   const workspaces = {
-    create(input: {
+    async create(input: {
       id: string;
       runId: string;
       projectId: string;
@@ -754,13 +747,13 @@ export function createRepositories(database: DatabaseSync) {
       setupCommands: string[];
       verificationCommands: string[];
       state?: WorkspaceRecord["state"];
-    }): WorkspaceRecord {
-      database
+    }): Promise<WorkspaceRecord> {
+      (await database
         .prepare(
           `INSERT INTO run_workspaces (
              id, run_id, project_id, source_path, workspace_path, baseline_path,
              baseline_commit, setup_commands_json, verification_commands_json, state
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         )
         .run(
           input.id,
@@ -773,34 +766,34 @@ export function createRepositories(database: DatabaseSync) {
           JSON.stringify(input.setupCommands),
           JSON.stringify(input.verificationCommands),
           input.state ?? "ready",
-        );
-      return getWorkspaceById(input.id)!;
+        ));
+      return (await getWorkspaceById(input.id))!;
     },
-    getById(id: string): WorkspaceRecord | null {
-      return getWorkspaceById(id);
+    async getById(id: string): Promise<WorkspaceRecord | null> {
+      return (await getWorkspaceById(id));
     },
-    getByRunId(runId: string): WorkspaceRecord | null {
-      const row = database
-        .prepare("SELECT id FROM run_workspaces WHERE run_id = ?")
-        .get(runId) as { id: string } | undefined;
-      return row ? getWorkspaceById(row.id) : null;
+    async getByRunId(runId: string): Promise<WorkspaceRecord | null> {
+      const row = (await database
+        .prepare("SELECT id FROM run_workspaces WHERE run_id = $1")
+        .get(runId)) as { id: string } | undefined;
+      return row ? (await getWorkspaceById(row.id)) : null;
     },
   };
 
   const checkpoints = {
-    create(input: {
+    async create(input: {
       id: string;
       runId: string;
       taskId?: string | null;
       baselineCommit: string | null;
       snapshotPath: string;
       changedFilesJson: string;
-    }): CheckpointRecord {
-      database
+    }): Promise<CheckpointRecord> {
+      (await database
         .prepare(
           `INSERT INTO checkpoints (
              id, run_id, task_id, baseline_commit, snapshot_path, changed_files_json
-           ) VALUES (?, ?, ?, ?, ?, ?)`,
+           ) VALUES ($1, $2, $3, $4, $5, $6)`,
         )
         .run(
           input.id,
@@ -809,28 +802,28 @@ export function createRepositories(database: DatabaseSync) {
           input.baselineCommit,
           input.snapshotPath,
           input.changedFilesJson,
-        );
-      return findById<CheckpointRecord>(database, "checkpoints", input.id)!;
+        ));
+      return (await findById<CheckpointRecord>(database, "checkpoints", input.id))!;
     },
-    getById(id: string): CheckpointRecord | null {
-      return findById(database, "checkpoints", id);
+    async getById(id: string): Promise<CheckpointRecord | null> {
+      return (await findById(database, "checkpoints", id));
     },
-    listForRun(runId: string): CheckpointRecord[] {
-      return database
-        .prepare("SELECT * FROM checkpoints WHERE run_id = ? ORDER BY created_at DESC, id DESC")
-        .all(runId)
+    async listForRun(runId: string): Promise<CheckpointRecord[]> {
+      return (await database
+        .prepare("SELECT * FROM checkpoints WHERE run_id = $1 ORDER BY created_at DESC, id DESC")
+        .all(runId))
         .map((row) => mapRow<CheckpointRecord>(row));
     },
   };
 
   const runPlans = {
-    create(input: Omit<RunPlanRecord, "createdAt">): RunPlanRecord {
-      database
+    async create(input: Omit<RunPlanRecord, "createdAt">): Promise<RunPlanRecord> {
+      (await database
         .prepare(
           `INSERT INTO run_plans (
              run_id, plan_version, goal, acceptance_criteria_json, setup_commands_json,
              verification_commands_json, allowed_tools_json, approval_id, approval_fingerprint
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         )
         .run(
           input.runId,
@@ -842,35 +835,35 @@ export function createRepositories(database: DatabaseSync) {
           input.allowedToolsJson,
           input.approvalId,
           input.approvalFingerprint,
-        );
-      return this.getByRunId(input.runId)!;
+        ));
+      return (await this.getByRunId(input.runId))!;
     },
-    getByRunId(runId: string): RunPlanRecord | null {
-      const row = database.prepare("SELECT * FROM run_plans WHERE run_id = ?").get(runId);
+    async getByRunId(runId: string): Promise<RunPlanRecord | null> {
+      const row = (await database.prepare("SELECT * FROM run_plans WHERE run_id = $1").get(runId));
       return row === undefined ? null : mapRow<RunPlanRecord>(row);
     },
   };
 
   const qaRounds = {
-    create(input: Omit<QaRoundRecord, "createdAt">): QaRoundRecord {
-      database
+    async create(input: Omit<QaRoundRecord, "createdAt">): Promise<QaRoundRecord> {
+      (await database
         .prepare(
           `INSERT INTO qa_rounds (id, run_id, round_number, status, details)
-           VALUES (?, ?, ?, ?, ?)`,
+           VALUES ($1, $2, $3, $4, $5)`,
         )
-        .run(input.id, input.runId, input.roundNumber, input.status, input.details);
-      return findById<QaRoundRecord>(database, "qa_rounds", input.id)!;
+        .run(input.id, input.runId, input.roundNumber, input.status, input.details));
+      return (await findById<QaRoundRecord>(database, "qa_rounds", input.id))!;
     },
-    listForRun(runId: string): QaRoundRecord[] {
-      return database
-        .prepare("SELECT * FROM qa_rounds WHERE run_id = ? ORDER BY round_number ASC")
-        .all(runId)
+    async listForRun(runId: string): Promise<QaRoundRecord[]> {
+      return (await database
+        .prepare("SELECT * FROM qa_rounds WHERE run_id = $1 ORDER BY round_number ASC")
+        .all(runId))
         .map((row) => mapRow<QaRoundRecord>(row));
     },
   };
 
   const usageRecords = {
-    create(input: {
+    async create(input: {
       id: string;
       runId: string;
       providerId?: string | null;
@@ -880,13 +873,13 @@ export function createRepositories(database: DatabaseSync) {
       outputTokens?: number;
       estimatedCostMicrounits?: number | null;
       usageState?: UsageRecord["usageState"];
-    }): UsageRecord {
-      database
+    }): Promise<UsageRecord> {
+      (await database
         .prepare(
           `INSERT INTO usage_records (
              id, run_id, provider_id, request_count, tool_call_count,
              input_tokens, output_tokens, estimated_cost_microunits, usage_state
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         )
         .run(
           input.id,
@@ -898,14 +891,14 @@ export function createRepositories(database: DatabaseSync) {
           input.outputTokens ?? 0,
           input.estimatedCostMicrounits ?? null,
           input.usageState ?? "known",
-        );
-      return findById<UsageRecord>(database, "usage_records", input.id)!;
+        ));
+      return (await findById<UsageRecord>(database, "usage_records", input.id))!;
     },
-    getById(id: string): UsageRecord | null {
-      return findById(database, "usage_records", id);
+    async getById(id: string): Promise<UsageRecord | null> {
+      return (await findById(database, "usage_records", id));
     },
-    list(): UsageRecord[] {
-      return listRecords(database, "usage_records");
+    async list(): Promise<UsageRecord[]> {
+      return (await listRecords(database, "usage_records"));
     },
   };
 

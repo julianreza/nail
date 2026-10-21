@@ -16,7 +16,7 @@ export async function POST(request: Request): Promise<Response> {
     return await createSubscriptionProviderHandler({
       auth,
       appOrigin: process.env.APP_ORIGIN,
-      databasePath: process.env.NAIL_DATABASE_PATH,
+      databaseUrl: process.env.DATABASE_URL,
       connector: createLocalSubscriptionConnector(),
     })(request);
   } catch {

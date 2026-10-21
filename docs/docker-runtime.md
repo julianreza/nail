@@ -16,7 +16,7 @@ docker build --target connector -t nail-connector-runtime:local .
 node scripts/docker-runtime-smoke.mjs
 ```
 
-The smoke test uses uniquely named disposable containers/volumes, generates temporary owner credentials locally, and publishes an ephemeral loopback-only port. It removes its own containers and volumes in `finally`; it does not touch existing app data or real accounts. It checks:
+The smoke test uses uniquely named disposable containers/volumes and local PostgreSQL 17, generates temporary owner/database credentials locally, and publishes an ephemeral loopback-only application port. It removes its own containers and volumes in `finally`; it does not touch existing app data, Supabase projects, or real accounts. The app shares only the disposable PostgreSQL container's network namespace for local loopback database transport; the database port is not published. It checks:
 
 - Missing required secrets cause exit 1.
 - Both images start with read-only root filesystems.
@@ -25,31 +25,34 @@ The smoke test uses uniquely named disposable containers/volumes, generates temp
 - Only the socket volume, not the private account volume, is shared with the app.
 - A configured but absent official CLI is reported as `not_installed`, never ready.
 - Provider metadata persists through an application restart and remains usable for a connector check.
+- The connector has neither `DATABASE_URL` nor the database secret mount.
 
-`NAIL_SMOKE_APP_IMAGE` and `NAIL_SMOKE_CONNECTOR_IMAGE` can override image tags. The test sends an HTTPS Origin header to the loopback HTTP backend and handles its Secure cookie explicitly; it does **not** exercise a real TLS proxy or browser cookie transport. Production requires HTTPS at the reverse proxy.
+`NAIL_SMOKE_APP_IMAGE`, `NAIL_SMOKE_CONNECTOR_IMAGE`, and `NAIL_SMOKE_POSTGRES_IMAGE` can override image tags. The test sends an HTTPS Origin header to the loopback HTTP backend and handles its Secure cookie explicitly; it does **not** exercise a real TLS proxy or browser cookie transport, nor does it certify Supabase TLS connectivity. Production requires HTTPS at the reverse proxy and verified database TLS for remote endpoints.
 
 ## Application container contract
 
-Mount three required, nonempty, read-only secret files under `/run/secrets`:
+Mount four required, nonempty, read-only secret files under `/run/secrets`:
 
 - `owner_password_hash`: only the value from `scripts/hash-owner-password.mjs`, not the `OWNER_PASSWORD_HASH=` prefix.
 - `session_secret`: only the value from `scripts/generate-session-secret.mjs`.
 - `nail_secret_encryption_key`: only the value from `scripts/generate-encryption-key.mjs`.
+- `database_url`: your Supabase direct or session-pooler PostgreSQL connection URL. The entrypoint exports it as server-only `DATABASE_URL`. Never mount this secret directory into the connector or sandbox.
 
-Do not pass secrets as Docker build arguments, put them in the build context, or bake them into an image. Keep source secret files outside the repository and build context. `.dockerignore` excludes `.env*`, private PEM files, SQLite files, local dependencies and worktrees; it is not a substitute for keeping arbitrary secret directories outside the build context.
+Do not pass secrets as Docker build arguments, put them in the build context, or bake them into an image. Keep source secret files outside the repository and build context. `.dockerignore` excludes `.env*`, private PEM files, old local database files, local dependencies and worktrees; it is not a substitute for keeping arbitrary secret directories outside the build context. Building needs no database credentials or connectivity.
 
 Set runtime environment explicitly:
 
 ```text
 APP_ORIGIN=https://your-exact-hostname
-NAIL_DATABASE_PATH=/var/lib/nail/app.sqlite
 NAIL_SECRET_DIR=/var/lib/nail/secrets
 NAIL_CONNECTOR_SOCKET=/socket/provider.sock
 ```
 
 `APP_ORIGIN` must be an exact HTTPS origin in production; HTTP is deliberately rejected by authentication. Publish the backend on loopback behind a separately managed HTTPS proxy.
 
-Mount persistent application storage at `/var/lib/nail`; back up the SQLite database, encrypted secret directory and encryption key together using a consistent SQLite backup procedure. The entrypoint loads secrets, initializes private directory permissions and ownership, then drops all capability sets and starts Node as UID/GID 10001. The app therefore starts briefly as container root; do not override `--user` for this target.
+Mount persistent application file storage at `/var/lib/nail`; back up the encrypted secret directory, encryption key and workspace/artifact files separately from PostgreSQL. Use Supabase backup/PITR or consistent PostgreSQL backups for database state. There is no old-data import or local-file database fallback. Remote connections verify certificates; if required, mount a trusted CA read-only and set `DATABASE_CA_CERT_PATH` to its path. See [PostgreSQL operations](postgresql.md).
+
+The entrypoint loads secrets, initializes private directory permissions and ownership, then drops all capability sets and starts Node as UID/GID 10001. The app therefore starts briefly as container root; do not override `--user` for this target.
 
 For a hardened read-only container, the smoke test demonstrates these flags:
 
@@ -83,4 +86,4 @@ The connector refuses to overwrite a pre-existing socket. Clean SIGTERM shutdown
 
 ## Verification recorded for this work
 
-Both target builds and `node scripts/docker-runtime-smoke.mjs` passed on the local rootless Docker daemon. Full Vitest, lint and diff checks are recorded separately in `docker-runtime-validation.md`. This is local runtime evidence, not target-VPS, real-browser/TLS, resource-limit or live-provider certification.
+`docker-runtime-validation.md` records historical pre-PostgreSQL evidence. Current PostgreSQL validation is recorded in `postgresql-validation.md`. Local runtime evidence is not target-VPS, real-browser/TLS, resource-limit or live-provider certification.

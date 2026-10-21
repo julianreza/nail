@@ -14,7 +14,7 @@ describe("interactive monster mascot", () => {
   it("drives antenna angle and fur response from the bounded cursor pose", () => {
     expect(getMascotPose(300, 100, { left: 100, top: 50, width: 200, height: 100 })).toMatchObject({
       eyeX: 6,
-      antennaRotate: 5,
+      antennaRotate: 8,
       furScale: 0.8,
     });
     expect(getMascotPose(200, 100, { left: 100, top: 50, width: 200, height: 100 })).toMatchObject({

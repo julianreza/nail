@@ -48,32 +48,32 @@ function approvedScope(baselineCommit: string | null): ApprovalScope {
   };
 }
 
-function createApprovedRun(
-  database: ReturnType<typeof openDatabase>,
+async function createApprovedRun(
+  database: Awaited<ReturnType<typeof openDatabase>>,
   runId: string,
   baselineCommit: string | null,
 ) {
   const repositories = createRepositories(database);
-  if (!repositories.projects.getById("project-1")) {
-    repositories.projects.create({
+  if (!(await repositories.projects.getById("project-1"))) {
+    (await repositories.projects.create({
       id: "project-1",
       name: "Nail",
       baselineCommit,
-    });
+    }));
   }
-  repositories.runs.create({
+  (await repositories.runs.create({
     id: runId,
     projectId: "project-1",
     state: "draft",
     planVersion: 1,
     baselineCommit,
-  });
+  }));
   const approvals = createApprovalService(database, { allowedPermissions });
-  const approval = approvals.submitForApproval(runId, approvedScope(baselineCommit));
-  approvals.decide(approval.id, {
+  const approval = (await approvals.submitForApproval(runId, approvedScope(baselineCommit)));
+  (await approvals.decide(approval.id, {
     decision: "approved",
     expectedFingerprint: approval.payloadFingerprint,
-  });
+  }));
 }
 
 afterEach(() => {
@@ -83,14 +83,14 @@ afterEach(() => {
 });
 
 describe("isolated run workspaces", () => {
-  it("creates separate workspaces from an approved clean baseline and records checkpoints", () => {
+  it("creates separate workspaces from an approved clean baseline and records checkpoints", async () => {
     const root = createTempDirectory();
-    const database = openDatabase(join(root, "db", "orchestrator.sqlite"));
+    const database = (await openDatabase(join(root, "db", "orchestrator-database")));
     const repository = createGitRepository(root);
     try {
-      createApprovedRun(database, "run-1", repository.baselineCommit);
-      createApprovedRun(database, "run-2", repository.baselineCommit);
-      const first = createRunWorkspace(database, {
+      (await createApprovedRun(database, "run-1", repository.baselineCommit));
+      (await createApprovedRun(database, "run-2", repository.baselineCommit));
+      const first = (await createRunWorkspace(database, {
         runId: "run-1",
         projectId: "project-1",
         sourcePath: repository.sourcePath,
@@ -98,8 +98,8 @@ describe("isolated run workspaces", () => {
         baselineCommit: repository.baselineCommit,
         scope: approvedScope(repository.baselineCommit),
         allowedPermissions,
-      });
-      const second = createRunWorkspace(database, {
+      }));
+      const second = (await createRunWorkspace(database, {
         runId: "run-2",
         projectId: "project-1",
         sourcePath: repository.sourcePath,
@@ -107,7 +107,7 @@ describe("isolated run workspaces", () => {
         baselineCommit: repository.baselineCommit,
         scope: approvedScope(repository.baselineCommit),
         allowedPermissions,
-      });
+      }));
 
       expect(first.workspacePath).not.toBe(second.workspacePath);
       expect(first.commands.setupCommands).toEqual(["bun install"]);
@@ -116,43 +116,43 @@ describe("isolated run workspaces", () => {
       expect(readFileSync(join(second.workspacePath, "src", "app.ts"), "utf8")).toContain("value = 1");
       expect(readFileSync(join(repository.sourcePath, "src", "app.ts"), "utf8")).toContain("value = 1");
 
-      createRepositories(database).tasks.create({
+      (await createRepositories(database).tasks.create({
         id: "task-1",
         runId: "run-1",
         title: "First subtask",
-      });
-      const checkpoint = createCheckpoint(database, {
+      }));
+      const checkpoint = (await createCheckpoint(database, {
         runId: "run-1",
         taskId: "task-1",
-      });
+      }));
       expect(checkpoint.changedFiles).toEqual([
         expect.objectContaining({ path: "src/app.ts", status: "modified" }),
       ]);
       expect(readFileSync(checkpoint.snapshotPath, "utf8")).toContain("src/app.ts");
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
-  it("rejects workspace creation without a matching approval or clean baseline", () => {
+  it("rejects workspace creation without a matching approval or clean baseline", async () => {
     const root = createTempDirectory();
-    const database = openDatabase(join(root, "db", "orchestrator.sqlite"));
+    const database = (await openDatabase(join(root, "db", "orchestrator-database")));
     const repository = createGitRepository(root);
     const repositories = createRepositories(database);
-    repositories.projects.create({
+    (await repositories.projects.create({
       id: "project-1",
       name: "Nail",
       baselineCommit: repository.baselineCommit,
-    });
-    repositories.runs.create({
+    }));
+    (await repositories.runs.create({
       id: "run-unapproved",
       projectId: "project-1",
       state: "draft",
       baselineCommit: repository.baselineCommit,
-    });
+    }));
     try {
-      expect(() =>
-        createRunWorkspace(database, {
+      await expect(async () =>
+        (await createRunWorkspace(database, {
           runId: "run-unapproved",
           projectId: "project-1",
           sourcePath: repository.sourcePath,
@@ -160,14 +160,14 @@ describe("isolated run workspaces", () => {
           baselineCommit: repository.baselineCommit,
           scope: approvedScope(repository.baselineCommit),
           allowedPermissions,
-        }),
-      ).toThrow();
+        })),
+      ).rejects.toThrow();
       expect(() => assertBaselineMatches("commit-a", "commit-b")).toThrow();
 
       writeFileSync(join(repository.sourcePath, "src", "app.ts"), "modified outside Git\n");
-      createApprovedRun(database, "run-2", repository.baselineCommit);
-      expect(() =>
-        createRunWorkspace(database, {
+      (await createApprovedRun(database, "run-2", repository.baselineCommit));
+      await expect(async () =>
+        (await createRunWorkspace(database, {
           runId: "run-2",
           projectId: "project-1",
           sourcePath: repository.sourcePath,
@@ -175,21 +175,21 @@ describe("isolated run workspaces", () => {
           baselineCommit: repository.baselineCommit,
           scope: approvedScope(repository.baselineCommit),
           allowedPermissions,
-        }),
-      ).toThrow();
+        })),
+      ).rejects.toThrow();
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
-  it("requires an absolute workspace root", () => {
+  it("requires an absolute workspace root", async () => {
     const root = createTempDirectory();
-    const database = openDatabase(join(root, "db", "orchestrator.sqlite"));
+    const database = (await openDatabase(join(root, "db", "orchestrator-database")));
     const repository = createGitRepository(root);
-    createApprovedRun(database, "run-1", repository.baselineCommit);
+    (await createApprovedRun(database, "run-1", repository.baselineCommit));
     try {
-      expect(() =>
-        createRunWorkspace(database, {
+      await expect(async () =>
+        (await createRunWorkspace(database, {
           runId: "run-1",
           projectId: "project-1",
           sourcePath: repository.sourcePath,
@@ -197,19 +197,19 @@ describe("isolated run workspaces", () => {
           baselineCommit: repository.baselineCommit,
           scope: approvedScope(repository.baselineCommit),
           allowedPermissions,
-        }),
-      ).toThrow(/absolute path/);
+        })),
+      ).rejects.toThrow(/absolute path/);
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
-  it("supports empty projects without initializing or committing a Git repository", () => {
+  it("supports empty projects without initializing or committing a Git repository", async () => {
     const root = createTempDirectory();
-    const database = openDatabase(join(root, "db", "orchestrator.sqlite"));
-    createApprovedRun(database, "run-empty", null);
+    const database = (await openDatabase(join(root, "db", "orchestrator-database")));
+    (await createApprovedRun(database, "run-empty", null));
     try {
-      const workspace = createRunWorkspace(database, {
+      const workspace = (await createRunWorkspace(database, {
         runId: "run-empty",
         projectId: "project-1",
         sourcePath: null,
@@ -217,11 +217,11 @@ describe("isolated run workspaces", () => {
         baselineCommit: null,
         scope: approvedScope(null),
         allowedPermissions,
-      });
+      }));
       expect(workspace.baselineCommit).toBeNull();
       expect(workspace.commands.verificationCommands).toEqual(["bun run lint"]);
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 });

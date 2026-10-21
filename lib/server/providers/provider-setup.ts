@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "../db/database";
 import { createRepositories, type ProviderRecord } from "../db/repositories";
 import { withTransaction } from "../db/database";
 import { EncryptedSecretStore } from "./secret-store";
@@ -142,26 +142,26 @@ function safeRecord(provider: ProviderRecord): SafeProviderRecord {
 }
 
 export async function createDeepSeekProviderSetup(
-  database: DatabaseSync,
+  database: Database,
   secretStore: EncryptedSecretStore,
   input: DeepSeekProviderSetupInput,
   fetcher: typeof fetch = globalThis.fetch,
 ): Promise<SafeProviderRecord> {
   validateInput(input);
   const repositories = createRepositories(database);
-  if (repositories.providers.list().some((provider) => provider.name.toLowerCase() === "deepseek")) {
+  if ((await repositories.providers.list()).some((provider) => provider.name.toLowerCase() === "deepseek")) {
     throw new ProviderSetupError("duplicate_provider", "A DeepSeek provider is already configured", 409);
   }
 
   await assertCredentialAndModel(input.apiKey, input.model, fetcher);
   let secretReference: string | undefined;
   try {
-    return withTransaction(database, () => {
-      if (repositories.providers.list().some((provider) => provider.name.toLowerCase() === "deepseek")) {
+    return (await withTransaction(database, async () => {
+      if ((await repositories.providers.list()).some((provider) => provider.name.toLowerCase() === "deepseek")) {
         throw new ProviderSetupError("duplicate_provider", "A DeepSeek provider is already configured", 409);
       }
       secretReference = secretStore.put(input.apiKey);
-      const provider = repositories.providers.create({
+      const provider = (await repositories.providers.create({
         id: randomUUID(),
         name: "DeepSeek",
         kind: "deepseek",
@@ -170,9 +170,9 @@ export async function createDeepSeekProviderSetup(
         authMode: "api_key",
         secretReference,
         capabilities: ["tools", "streaming"],
-      });
+      }));
       return safeRecord(provider);
-    });
+    }));
   } catch (error) {
     if (secretReference) {
       try {

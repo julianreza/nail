@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "../db/database";
 import { SUBSCRIPTION_PROVIDER_KINDS } from "../../domain/subscription-provider";
 import { createRepositories } from "../db/repositories";
 import { configureRunUsageBudget } from "../providers/usage-budget";
@@ -74,16 +74,16 @@ function validateRequest(input: CreatePlanRequest): void {
 }
 
 export async function createRunPlanFromGoal(
-  database: DatabaseSync,
+  database: Database,
   input: CreatePlanRequest,
   policy: RunPlanPolicy,
   generate: PlanGenerator,
 ) {
   validateRequest(input);
   const repositories = createRepositories(database);
-  const project = repositories.projects.getById(input.projectId);
+  const project = (await repositories.projects.getById(input.projectId));
   if (!project) throw new Error("Project does not exist");
-  const provider = repositories.providers.getById(input.providerId);
+  const provider = (await repositories.providers.getById(input.providerId));
   const deepSeekReady = provider?.kind === "deepseek" &&
     provider.status === "ready" && provider.authMode === "api_key" &&
     provider.secretReference !== null && provider.model !== null;
@@ -91,7 +91,7 @@ export async function createRunPlanFromGoal(
     provider?.kind !== undefined && SUBSCRIPTION_PROVIDER_KINDS.includes(provider.kind) &&
     provider.status === "ready" && provider.authMode === "subscription_cli" &&
     provider.secretReference === null && provider.model !== null &&
-    repositories.accountBindings.getByProviderId(provider.id)?.state === "ready";
+    (await repositories.accountBindings.getByProviderId(provider.id))?.state === "ready";
   if (!provider || (!deepSeekReady && !subscriptionReady)) {
     throw new Error("A ready provider with a verified authentication mode is required to generate a plan");
   }
@@ -101,26 +101,26 @@ export async function createRunPlanFromGoal(
   }
 
   const runId = randomUUID();
-  repositories.runs.create({
+  (await repositories.runs.create({
     id: runId,
     projectId: project.id,
     state: "draft",
     planVersion: 1,
     baselineCommit: project.baselineCommit,
-  });
-  configureRunUsageBudget(database, {
+  }));
+  (await configureRunUsageBudget(database, {
     runId,
     maxRequests: input.maxRequests,
     maxToolCalls: input.maxToolCalls,
     maxOutputTokens: input.maxOutputTokens,
-  });
-  repositories.conversations.create({
+  }));
+  (await repositories.conversations.create({
     id: randomUUID(),
     projectId: project.id,
     runId,
     actor: "owner",
     content: input.goal,
-  });
+  }));
 
   const context: PlanValidationContext = {
     allowedTools: [...policy.allowedTools],
@@ -136,15 +136,15 @@ export async function createRunPlanFromGoal(
       providerId: provider.id,
       goal: input.goal,
       baselineCommit: project.baselineCommit,
-      agents: repositories.agents
-        .list()
+      agents: (await repositories.agents
+        .list())
         .filter((agent) => agent.projectId === null || agent.projectId === project.id)
         .map(({ id, role }) => ({ id, role })),
       allowedTools: context.allowedTools,
       maxOutputTokens: input.maxOutputTokens,
     });
-    const planSubmission = proposePlanForApproval(database, runId, modelProposal, context);
-    repositories.conversations.create({
+    const planSubmission = (await proposePlanForApproval(database, runId, modelProposal, context));
+    (await repositories.conversations.create({
       id: randomUUID(),
       projectId: project.id,
       runId,
@@ -155,20 +155,20 @@ export async function createRunPlanFromGoal(
         taskCount: planSubmission.plan.subtasks.length,
         approvalId: planSubmission.approval.id,
       }),
-    });
+    }));
     return { runId, ...planSubmission };
   } catch (error) {
-    const run = repositories.runs.getById(runId);
+    const run = (await repositories.runs.getById(runId));
     if (run?.state === "draft") {
       const approvals = createApprovalService(database, {
         allowedPermissions: policy.allowedPermissions,
       });
-      approvals.transitionRun(runId, "failed", "system");
-      repositories.events.append({
+      (await approvals.transitionRun(runId, "failed", "system"));
+      (await repositories.events.append({
         runId,
         eventType: "plan.generation_failed",
         payload: { errorType: error instanceof Error ? error.name : "UnknownError" },
-      });
+      }));
     }
     throw error;
   }

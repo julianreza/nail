@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "../db/database";
 import { createRepositories } from "../db/repositories";
 import { reserveProviderRequest, completeProviderUsage, UsageBudgetExceededError } from "./usage-budget";
 import { SubscriptionProviderError } from "./subscription-errors";
@@ -28,7 +28,7 @@ function validateResult(value: SubscriptionCompletion, providerModel: string): v
 }
 
 export async function completeProviderText(
-  database: DatabaseSync,
+  database: Database,
   providerId: string,
   runId: string,
   prompt: string,
@@ -46,8 +46,8 @@ export async function completeProviderText(
   if (signal.aborted) throw new SubscriptionProviderError("cancelled");
 
   const repositories = createRepositories(database);
-  const provider = repositories.providers.getById(providerId);
-  const run = repositories.runs.getById(runId);
+  const provider = (await repositories.providers.getById(providerId));
+  const run = (await repositories.runs.getById(runId));
   if (!provider || !run || !["draft", "running"].includes(run.state)) {
     throw new SubscriptionProviderError("invalid_binding");
   }
@@ -58,14 +58,14 @@ export async function completeProviderText(
     provider.secretReference !== null
   ) throw new SubscriptionProviderError("wrong_auth_mode");
   if (provider.status !== "ready") throw new SubscriptionProviderError("unavailable");
-  const binding = repositories.accountBindings.getByProviderId(provider.id);
+  const binding = (await repositories.accountBindings.getByProviderId(provider.id));
   if (
     !binding || binding.state !== "ready" ||
     !BINDING_ID.test(binding.bindingId)
   ) throw new SubscriptionProviderError("invalid_binding");
   if (!provider.model) throw new SubscriptionProviderError("invalid_model");
 
-  const reservation = reserveProviderRequest(database, { runId, providerId, maxOutputTokens });
+  const reservation = (await reserveProviderRequest(database, { runId, providerId, maxOutputTokens }));
   let settled = false;
   try {
     const result = await connector.complete({
@@ -77,41 +77,41 @@ export async function completeProviderText(
     try {
       validateResult(result, provider.model);
     } catch (error) {
-      completeProviderUsage(database, reservation.id, {
+      (await completeProviderUsage(database, reservation.id, {
         inputTokens: null,
         outputTokens: null,
         toolCalls: 0,
-      });
+      }));
       settled = true;
       throw error;
     }
 
     if (result.usage.outputTokens !== null && result.usage.outputTokens > maxOutputTokens) {
-      completeProviderUsage(database, reservation.id, {
+      (await completeProviderUsage(database, reservation.id, {
         inputTokens: null,
         outputTokens: null,
         toolCalls: 0,
-      });
+      }));
       settled = true;
       throw new UsageBudgetExceededError("output_tokens");
     }
 
-    const budgetResult = completeProviderUsage(database, reservation.id, {
+    const budgetResult = (await completeProviderUsage(database, reservation.id, {
       inputTokens: result.usage.inputTokens,
       outputTokens: result.usage.outputTokens,
       toolCalls: 0,
-    });
+    }));
     settled = true;
     if (!budgetResult.toolCallsAllowed) throw new UsageBudgetExceededError("tool_calls");
     return result;
   } catch (error) {
     if (!settled) {
       try {
-        completeProviderUsage(database, reservation.id, {
+        (await completeProviderUsage(database, reservation.id, {
           inputTokens: null,
           outputTokens: null,
           toolCalls: 0,
-        });
+        }));
         settled = true;
       } catch {
         // Keep the original failure. The reserved output remains conservatively charged.

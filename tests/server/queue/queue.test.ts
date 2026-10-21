@@ -13,23 +13,23 @@ import { runWorkerOnce } from "../../../worker/runner";
 const temporaryDirectories: string[] = [];
 const now = "2026-10-19T10:00:00.000Z";
 
-function createDatabasePath(): string {
+function createDatabaseIdentity(): string {
   const directory = mkdtempSync(join(tmpdir(), "nail-queue-test-"));
   temporaryDirectories.push(directory);
-  return join(directory, "orchestrator.sqlite");
+  return join(directory, "orchestrator-database");
 }
 
-function createApprovedRun() {
-  const database = openDatabase(createDatabasePath());
+async function createApprovedRun() {
+  const database = (await openDatabase(createDatabaseIdentity()));
   const repositories = createRepositories(database);
-  repositories.projects.create({ id: "project-1", name: "Nail" });
-  repositories.runs.create({
+  (await repositories.projects.create({ id: "project-1", name: "Nail" }));
+  (await repositories.runs.create({
     id: "run-1",
     projectId: "project-1",
     state: "draft",
     planVersion: 1,
     baselineCommit: "base-1",
-  });
+  }));
   const approvals = createApprovalService(database, {
     allowedPermissions: ["workspace:read"],
   });
@@ -41,11 +41,11 @@ function createApprovedRun() {
     permissions: ["workspace:read"],
     costLimitMicrounits: 1_000_000,
   };
-  const approval = approvals.submitForApproval("run-1", scope);
-  approvals.decide(approval.id, {
+  const approval = (await approvals.submitForApproval("run-1", scope));
+  (await approvals.decide(approval.id, {
     decision: "approved",
     expectedFingerprint: approval.payloadFingerprint,
-  });
+  }));
   return { database, repositories };
 }
 
@@ -56,85 +56,85 @@ afterEach(() => {
 });
 
 describe("persistent serial worker queue", () => {
-  it("allows only one global worker claim", () => {
-    const { database, repositories } = createApprovedRun();
+  it("allows only one global worker claim", async () => {
+    const { database, repositories } = (await createApprovedRun());
     try {
-      const first = claimNextJob(database, {
+      const first = (await claimNextJob(database, {
         workerId: "worker-a",
         now,
         leaseDurationMs: 30_000,
-      });
-      const second = claimNextJob(database, {
+      }));
+      const second = (await claimNextJob(database, {
         workerId: "worker-b",
         now,
         leaseDurationMs: 30_000,
-      });
+      }));
 
       expect(first).toMatchObject({ runId: "run-1", workerId: "worker-a" });
       expect(second).toBeNull();
-      expect(repositories.runs.getById("run-1")?.state).toBe("running");
-      expect(repositories.leases.get()?.workerId).toBe("worker-a");
+      expect((await repositories.runs.getById("run-1"))?.state).toBe("running");
+      expect((await repositories.leases.get())?.workerId).toBe("worker-a");
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
-  it("fails closed until sandbox reconciliation, then marks stale work interrupted without requeue", () => {
-    const { database, repositories } = createApprovedRun();
+  it("fails closed until sandbox reconciliation, then marks stale work interrupted without requeue", async () => {
+    const { database, repositories } = (await createApprovedRun());
     try {
-      claimNextJob(database, {
+      (await claimNextJob(database, {
         workerId: "worker-a",
         now,
         leaseDurationMs: 1000,
-      });
+      }));
       const later = new Date(Date.parse(now) + 20_000).toISOString();
 
       expect(
-        recoverExpiredLease(database, { now: later, sandboxReconciled: false }),
+        (await recoverExpiredLease(database, { now: later, sandboxReconciled: false })),
       ).toMatchObject({ recovered: false });
-      expect(repositories.runs.getById("run-1")?.state).toBe("running");
+      expect((await repositories.runs.getById("run-1"))?.state).toBe("running");
       expect(
-        recoverExpiredLease(database, { now: later, sandboxReconciled: true }),
+        (await recoverExpiredLease(database, { now: later, sandboxReconciled: true })),
       ).toMatchObject({ recovered: true, runId: "run-1" });
-      expect(repositories.runs.getById("run-1")?.state).toBe("interrupted");
-      expect(repositories.leases.get()).toBeNull();
+      expect((await repositories.runs.getById("run-1"))?.state).toBe("interrupted");
+      expect((await repositories.leases.get())).toBeNull();
       expect(
-        claimNextJob(database, {
+        (await claimNextJob(database, {
           workerId: "worker-b",
           now: later,
           leaseDurationMs: 30_000,
-        }),
+        })),
       ).toBeNull();
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
-  it("resumes event reads after a cursor without replaying prior events", () => {
-    const { database, repositories } = createApprovedRun();
+  it("resumes event reads after a cursor without replaying prior events", async () => {
+    const { database, repositories } = (await createApprovedRun());
     try {
-      const cursor = repositories.events.append({
+      const cursor = (await repositories.events.append({
         runId: "run-1",
         eventType: "client.connected",
         payload: { cursor: true },
-      });
-      claimNextJob(database, {
+      }));
+      (await claimNextJob(database, {
         workerId: "worker-a",
         now,
         leaseDurationMs: 30_000,
-      });
+      }));
 
-      const resumed = repositories.events.listAfter("run-1", cursor.id);
+      const resumed = (await repositories.events.listAfter("run-1", cursor.id));
       expect(resumed).toHaveLength(1);
       expect(resumed[0]?.eventType).toBe("run.state_changed");
-      expect(repositories.events.listAfter("run-1", resumed[0]!.id)).toEqual([]);
+      expect((await repositories.events.listAfter("run-1", resumed[0]!.id))).toEqual([]);
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
   it("renews the lease while a job runs longer than one lease period", async () => {
-    const { database, repositories } = createApprovedRun();
+    const { database, repositories } = (await createApprovedRun());
     try {
       const result = await runWorkerOnce({
         database,
@@ -147,15 +147,15 @@ describe("persistent serial worker queue", () => {
       });
 
       expect(result).toMatchObject({ runId: "run-1", state: "awaiting_review", finalized: true });
-      expect(repositories.runs.getById("run-1")?.state).toBe("awaiting_review");
-      expect(repositories.leases.get()).toBeNull();
+      expect((await repositories.runs.getById("run-1"))?.state).toBe("awaiting_review");
+      expect((await repositories.leases.get())).toBeNull();
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
   it("forwards cancellation to the job executor and releases the lease", async () => {
-    const { database, repositories } = createApprovedRun();
+    const { database, repositories } = (await createApprovedRun());
     const cancellation = new AbortController();
     let started!: () => void;
     const jobStarted = new Promise<void>((resolve) => {
@@ -182,10 +182,10 @@ describe("persistent serial worker queue", () => {
       cancellation.abort();
       await job;
 
-      expect(repositories.runs.getById("run-1")?.state).toBe("cancelled");
-      expect(repositories.leases.get()).toBeNull();
+      expect((await repositories.runs.getById("run-1"))?.state).toBe("cancelled");
+      expect((await repositories.leases.get())).toBeNull();
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 });

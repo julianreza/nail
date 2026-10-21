@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "../db/database";
 import { randomUUID } from "node:crypto";
 import { createRepositories } from "../db/repositories";
 import { withTransaction } from "../db/database";
@@ -36,66 +36,66 @@ function requireCount(value: number, name: string, allowZero = false): void {
   }
 }
 
-function readBudget(database: DatabaseSync, runId: string): RunUsageBudget {
-  const budget = database
+async function readBudget(database: Database, runId: string): Promise<RunUsageBudget> {
+  const budget = (await database
     .prepare(
-      `SELECT run_id AS runId, max_requests AS maxRequests,
-              max_tool_calls AS maxToolCalls, max_output_tokens AS maxOutputTokens
-       FROM run_usage_budgets WHERE run_id = ?`,
+      `SELECT run_id AS "runId", max_requests AS "maxRequests",
+              max_tool_calls AS "maxToolCalls", max_output_tokens AS "maxOutputTokens"
+       FROM run_usage_budgets WHERE run_id = $1`,
     )
-    .get(runId) as RunUsageBudget | undefined;
+    .get(runId)) as RunUsageBudget | undefined;
   if (!budget) throw new Error("Finite run usage budget is not configured");
   return budget;
 }
 
-function readUsed(database: DatabaseSync, runId: string, exceptId?: string): RemainingUsageBudget {
-  const result = database
+async function readUsed(database: Database, runId: string, exceptId?: string): Promise<RemainingUsageBudget> {
+  const result = (await database
     .prepare(
       `SELECT COALESCE(SUM(request_count), 0) AS requests,
-              COALESCE(SUM(tool_call_count), 0) AS toolCalls,
-              COALESCE(SUM(output_tokens), 0) AS outputTokens
-       FROM usage_records WHERE run_id = ? AND (? IS NULL OR id <> ?)`,
+              COALESCE(SUM(tool_call_count), 0) AS "toolCalls",
+              COALESCE(SUM(output_tokens), 0) AS "outputTokens"
+       FROM usage_records WHERE run_id = $1 AND ($2::text IS NULL OR id <> $3)`,
     )
-    .get(runId, exceptId ?? null, exceptId ?? null) as unknown as RemainingUsageBudget | undefined;
+    .get(runId, exceptId ?? null, exceptId ?? null)) as unknown as RemainingUsageBudget | undefined;
   if (!result) return { requests: 0, toolCalls: 0, outputTokens: 0 };
   return result;
 }
 
-export function configureRunUsageBudget(
-  database: DatabaseSync,
+export async function configureRunUsageBudget(
+  database: Database,
   input: RunUsageBudget,
-): RunUsageBudget {
+): Promise<RunUsageBudget> {
   requireCount(input.maxRequests, "maxRequests");
   requireCount(input.maxToolCalls, "maxToolCalls", true);
   requireCount(input.maxOutputTokens, "maxOutputTokens");
-  return withTransaction(database, () => {
-    if (!createRepositories(database).runs.getById(input.runId)) {
+  return (await withTransaction(database, async () => {
+    if (!(await createRepositories(database).runs.getById(input.runId))) {
       throw new Error("Run does not exist");
     }
-    const existing = database
-      .prepare("SELECT run_id FROM run_usage_budgets WHERE run_id = ?")
-      .get(input.runId);
+    const existing = (await database
+      .prepare("SELECT run_id FROM run_usage_budgets WHERE run_id = $1")
+      .get(input.runId));
     if (existing) throw new Error("Run usage budget is already configured");
-    const priorUsage = readUsed(database, input.runId);
+    const priorUsage = (await readUsed(database, input.runId));
     if (priorUsage.requests || priorUsage.toolCalls || priorUsage.outputTokens) {
       throw new Error("Usage budget must be set before provider requests begin");
     }
-    database
+    (await database
       .prepare(
         `INSERT INTO run_usage_budgets (run_id, max_requests, max_tool_calls, max_output_tokens)
-         VALUES (?, ?, ?, ?)`,
+         VALUES ($1, $2, $3, $4)`,
       )
-      .run(input.runId, input.maxRequests, input.maxToolCalls, input.maxOutputTokens);
+      .run(input.runId, input.maxRequests, input.maxToolCalls, input.maxOutputTokens));
     return input;
-  });
+  }));
 }
 
-export function getRemainingUsageBudget(
-  database: DatabaseSync,
+export async function getRemainingUsageBudget(
+  database: Database,
   runId: string,
-): RemainingUsageBudget {
-  const budget = readBudget(database, runId);
-  const used = readUsed(database, runId);
+): Promise<RemainingUsageBudget> {
+  const budget = (await readBudget(database, runId));
+  const used = (await readUsed(database, runId));
   return {
     requests: Math.max(0, budget.maxRequests - used.requests),
     toolCalls: Math.max(0, budget.maxToolCalls - used.toolCalls),
@@ -103,14 +103,14 @@ export function getRemainingUsageBudget(
   };
 }
 
-export function reserveProviderRequest(
-  database: DatabaseSync,
+export async function reserveProviderRequest(
+  database: Database,
   input: { runId: string; providerId: string; maxOutputTokens: number },
-): UsageReservation {
+): Promise<UsageReservation> {
   requireCount(input.maxOutputTokens, "maxOutputTokens");
-  return withTransaction(database, () => {
-    const budget = readBudget(database, input.runId);
-    const used = readUsed(database, input.runId);
+  return (await withTransaction(database, async () => {
+    const budget = (await readBudget(database, input.runId));
+    const used = (await readUsed(database, input.runId));
     if (used.requests + 1 > budget.maxRequests) {
       throw new UsageBudgetExceededError("requests");
     }
@@ -118,7 +118,7 @@ export function reserveProviderRequest(
       throw new UsageBudgetExceededError("output_tokens");
     }
     const id = randomUUID();
-    createRepositories(database).usageRecords.create({
+    (await createRepositories(database).usageRecords.create({
       id,
       runId: input.runId,
       providerId: input.providerId,
@@ -126,45 +126,45 @@ export function reserveProviderRequest(
       toolCallCount: 0,
       outputTokens: input.maxOutputTokens,
       usageState: "reserved",
-    });
+    }));
     return {
       id,
       runId: input.runId,
       providerId: input.providerId,
       reservedOutputTokens: input.maxOutputTokens,
     };
-  });
+  }));
 }
 
-export function completeProviderUsage(
-  database: DatabaseSync,
+export async function completeProviderUsage(
+  database: Database,
   reservationId: string,
   input: { inputTokens: number | null; outputTokens: number | null; toolCalls: number },
-): { toolCallsAllowed: boolean } {
+): Promise<{ toolCallsAllowed: boolean }> {
   if (input.inputTokens !== null) requireCount(input.inputTokens, "inputTokens", true);
   if (input.outputTokens !== null) requireCount(input.outputTokens, "outputTokens", true);
   requireCount(input.toolCalls, "toolCalls", true);
-  return withTransaction(database, () => {
+  return (await withTransaction(database, async () => {
     const repositories = createRepositories(database);
-    const reservation = repositories.usageRecords.getById(reservationId);
+    const reservation = (await repositories.usageRecords.getById(reservationId));
     if (!reservation || reservation.requestCount !== 1 || reservation.usageState !== "reserved") {
       throw new Error("Usage reservation does not exist or was already settled");
     }
-    const budget = readBudget(database, reservation.runId);
+    const budget = (await readBudget(database, reservation.runId));
     if (
       input.outputTokens !== null &&
       input.outputTokens > reservation.outputTokens
     ) {
       throw new UsageBudgetExceededError("output_tokens");
     }
-    const used = readUsed(database, reservation.runId, reservationId);
+    const used = (await readUsed(database, reservation.runId, reservationId));
     const toolCallsAllowed = used.toolCalls + input.toolCalls <= budget.maxToolCalls;
     const usageIsKnown = input.inputTokens !== null && input.outputTokens !== null;
-    const result = database
+    const result = (await database
       .prepare(
         `UPDATE usage_records
-         SET input_tokens = ?, output_tokens = ?, tool_call_count = ?, usage_state = ?
-         WHERE id = ? AND request_count = 1 AND usage_state = 'reserved'`,
+         SET input_tokens = $1, output_tokens = $2, tool_call_count = $3, usage_state = $4
+         WHERE id = $5 AND request_count = 1 AND usage_state = 'reserved'`,
       )
       .run(
         input.inputTokens ?? reservation.inputTokens,
@@ -172,8 +172,8 @@ export function completeProviderUsage(
         input.toolCalls,
         usageIsKnown ? "known" : "unknown",
         reservationId,
-      );
+      ));
     if (result.changes !== 1) throw new Error("Usage reservation changed before completion");
     return { toolCallsAllowed };
-  });
+  }));
 }

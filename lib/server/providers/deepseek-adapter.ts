@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "../db/database";
 import { createRepositories } from "../db/repositories";
 import { EncryptedSecretStore } from "./secret-store";
 import {
@@ -219,7 +219,7 @@ function streamChunk(value: string): { usage: { inputTokens: number; outputToken
 function usageTrackingStream(
   source: ReadableStream<Uint8Array>,
   secret: string,
-  finalize: (usage: { inputTokens: number; outputTokens: number } | null) => void,
+  finalize: (usage: { inputTokens: number; outputTokens: number } | null) => Promise<void>,
 ): ReadableStream<Uint8Array> {
   const reader = source.getReader();
   const decoder = new TextDecoder();
@@ -266,10 +266,10 @@ function usageTrackingStream(
     }
   }
 
-  function finalizeOnce(): void {
+  async function finalizeOnce(): Promise<void> {
     if (finalized) return;
     finalized = true;
-    finalize(finalUsage);
+    await finalize(finalUsage);
   }
 
   return new ReadableStream<Uint8Array>({
@@ -280,7 +280,7 @@ function usageTrackingStream(
           const tail = decoder.decode();
           observeLines(tail, true);
           const last = redactChunk("", true);
-          finalizeOnce();
+          await finalizeOnce();
           if (last) controller.enqueue(encoder.encode(last));
           controller.close();
           return;
@@ -292,7 +292,7 @@ function usageTrackingStream(
       } catch (error) {
         await reader.cancel(error).catch(() => undefined);
         try {
-          finalizeOnce();
+          await finalizeOnce();
         } catch {
           // Keep the original stream error; reserved output remains conservatively charged.
         }
@@ -301,7 +301,7 @@ function usageTrackingStream(
     },
     async cancel(reason) {
       await reader.cancel(reason).catch(() => undefined);
-      finalizeOnce();
+      await finalizeOnce();
     },
   });
 }
@@ -311,7 +311,7 @@ export class DeepSeekAdapter {
 
   constructor(
     private readonly options: {
-      database: DatabaseSync;
+      database: Database;
       secretStore: EncryptedSecretStore;
       fetcher?: typeof fetch;
     },
@@ -322,7 +322,7 @@ export class DeepSeekAdapter {
   async complete(request: DeepSeekRequest): Promise<DeepSeekResult> {
     validateRequest(request);
     const repositories = createRepositories(this.options.database);
-    const provider = repositories.providers.getById(request.providerId);
+    const provider = (await repositories.providers.getById(request.providerId));
     if (
       !provider ||
       provider.kind !== "deepseek" ||
@@ -342,16 +342,16 @@ export class DeepSeekAdapter {
     if (request.stream && request.tools?.length) {
       throw new ProviderCapabilityError("streaming tool calls");
     }
-    if (request.tools?.length && getRemainingUsageBudget(this.options.database, request.runId).toolCalls < 1) {
+    if (request.tools?.length && (await getRemainingUsageBudget(this.options.database, request.runId)).toolCalls < 1) {
       throw new UsageBudgetExceededError("tool_calls");
     }
 
     const apiKey = this.options.secretStore.get(provider.secretReference);
-    const reservation = reserveProviderRequest(this.options.database, {
+    const reservation = (await reserveProviderRequest(this.options.database, {
       runId: request.runId,
       providerId: provider.id,
       maxOutputTokens: request.maxOutputTokens,
-    });
+    }));
     const body = {
       model: provider.model,
       messages: request.messages,
@@ -375,38 +375,38 @@ export class DeepSeekAdapter {
         body: redactSecret(JSON.stringify(body), apiKey),
       });
     } catch {
-      repositories.providers.updateStatus(provider.id, "unavailable");
+      (await repositories.providers.updateStatus(provider.id, "unavailable"));
       throw new ProviderUnavailableError();
     }
 
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
-        repositories.providers.updateStatus(provider.id, "needs_login");
+        (await repositories.providers.updateStatus(provider.id, "needs_login"));
         throw new ProviderAuthenticationError();
       }
       if (response.status === 429) {
-        repositories.providers.updateStatus(provider.id, "rate_limited");
+        (await repositories.providers.updateStatus(provider.id, "rate_limited"));
         throw new ProviderRateLimitError();
       }
       if (response.status >= 500) {
-        repositories.providers.updateStatus(provider.id, "unavailable");
+        (await repositories.providers.updateStatus(provider.id, "unavailable"));
         throw new ProviderUnavailableError();
       }
       throw new ProviderRequestError(response.status);
     }
-    repositories.providers.updateStatus(provider.id, "ready");
+    (await repositories.providers.updateStatus(provider.id, "ready"));
 
     if (request.stream) {
       if (!response.body) {
-        repositories.providers.updateStatus(provider.id, "unavailable");
+        (await repositories.providers.updateStatus(provider.id, "unavailable"));
         throw new ProviderResponseError();
       }
-      const stream = usageTrackingStream(response.body, apiKey, (usage) => {
-        completeProviderUsage(this.options.database, reservation.id, {
+      const stream = usageTrackingStream(response.body, apiKey, async (usage) => {
+        (await completeProviderUsage(this.options.database, reservation.id, {
           inputTokens: usage?.inputTokens ?? null,
           outputTokens: usage?.outputTokens ?? null,
           toolCalls: 0,
-        });
+        }));
       });
       return {
         kind: "stream",
@@ -420,41 +420,41 @@ export class DeepSeekAdapter {
     try {
       raw = await response.json();
     } catch {
-      repositories.providers.updateStatus(provider.id, "unavailable");
+      (await repositories.providers.updateStatus(provider.id, "unavailable"));
       throw new ProviderResponseError();
     }
     if (!isRecord(raw) || typeof raw.id !== "string" || !Array.isArray(raw.choices)) {
-      repositories.providers.updateStatus(provider.id, "unavailable");
+      (await repositories.providers.updateStatus(provider.id, "unavailable"));
       throw new ProviderResponseError();
     }
     const choice = raw.choices[0];
     if (!isRecord(choice) || !isRecord(choice.message)) {
-      repositories.providers.updateStatus(provider.id, "unavailable");
+      (await repositories.providers.updateStatus(provider.id, "unavailable"));
       throw new ProviderResponseError();
     }
     const message = choice.message;
     if (message.role !== "assistant" || (message.content !== null && typeof message.content !== "string")) {
-      repositories.providers.updateStatus(provider.id, "unavailable");
+      (await repositories.providers.updateStatus(provider.id, "unavailable"));
       throw new ProviderResponseError();
     }
     let toolCalls: DeepSeekToolCall[];
     try {
       toolCalls = parseToolCalls(message.tool_calls);
     } catch {
-      repositories.providers.updateStatus(provider.id, "unavailable");
+      (await repositories.providers.updateStatus(provider.id, "unavailable"));
       throw new ProviderResponseError();
     }
     if (toolCalls.length > 0 && !request.tools?.length) {
-      repositories.providers.updateStatus(provider.id, "unavailable");
+      (await repositories.providers.updateStatus(provider.id, "unavailable"));
       throw new ProviderResponseError();
     }
 
     const usage = parseUsage(raw.usage);
-    const budgetResult = completeProviderUsage(this.options.database, reservation.id, {
+    const budgetResult = (await completeProviderUsage(this.options.database, reservation.id, {
       inputTokens: usage?.inputTokens ?? null,
       outputTokens: usage?.outputTokens ?? null,
       toolCalls: toolCalls.length,
-    });
+    }));
     if (!budgetResult.toolCallsAllowed) {
       throw new UsageBudgetExceededError("tool_calls");
     }

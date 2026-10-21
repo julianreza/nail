@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "../db/database";
 import { openDatabase, createRepositories } from "../db/database";
 import { isSameOriginRequest } from "../auth/auth-service";
 import { createApprovalService } from "../runs/approval-service";
@@ -53,7 +53,7 @@ async function readBoundedJson(request: Request, maxBytes = 4096): Promise<unkno
 
 export function createApprovalDecisionHandler(
   auth: AuthGuard,
-  databasePath: string | undefined,
+  databaseUrl: string | undefined,
   appOrigin: string | undefined,
   allowedPermissions: readonly string[] = allowedRunPermissionsFromEnvironment(),
 ) {
@@ -66,7 +66,7 @@ export function createApprovalDecisionHandler(
     if (!appOrigin || !isSameOriginRequest(request, appOrigin)) {
       return json({ error: "Invalid origin" }, 403);
     }
-    if (!databasePath) return json({ error: "Database is not configured" }, 503);
+    if (!databaseUrl) return json({ error: "Database is not configured" }, 503);
     if (!/^[0-9a-f-]{36}$/i.test(approvalId)) {
       return json({ error: "Approval not found" }, 404);
     }
@@ -89,29 +89,29 @@ export function createApprovalDecisionHandler(
       return json({ error: "Invalid approval decision" }, 400);
     }
 
-    let database: DatabaseSync | undefined;
+    let database: Database | undefined;
     try {
-      database = openDatabase(databasePath);
+      database = (await openDatabase(databaseUrl));
       const repositories = createRepositories(database);
-      const approval = repositories.approvals.getById(approvalId);
+      const approval = (await repositories.approvals.getById(approvalId));
       if (!approval) return json({ error: "Approval not found" }, 404);
-      const decided = createApprovalService(database, { allowedPermissions }).decide(
+      const decided = (await createApprovalService(database, { allowedPermissions }).decide(
         approvalId,
         {
           decision: input.decision,
           expectedFingerprint: input.expectedFingerprint,
         },
-      );
+      ));
       return json({
         approvalId: decided.id,
         decision: decided.decision,
         runId: decided.runId,
-        runState: repositories.runs.getById(decided.runId)?.state ?? null,
+        runState: (await repositories.runs.getById(decided.runId))?.state ?? null,
       }, 200);
     } catch {
       return json({ error: "Approval is stale or could not be changed" }, 409);
     } finally {
-      database?.close();
+      (await database?.close());
     }
   };
 }

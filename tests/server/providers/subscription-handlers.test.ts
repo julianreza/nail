@@ -23,7 +23,7 @@ const binding = {
 function setup(options: { authenticated?: boolean; connector?: Partial<SubscriptionConnectorControl> } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "nail-subscription-handlers-"));
   directories.push(directory);
-  const databasePath = join(directory, "app.sqlite");
+  const databaseUrl = join(directory, "app-database");
   let cancelCalls = 0;
   const defaultConnector: SubscriptionConnectorControl = {
     listBindings: async () => [{
@@ -47,12 +47,12 @@ function setup(options: { authenticated?: boolean; connector?: Partial<Subscript
         : Response.json({ authenticated: true }),
     },
     appOrigin: origin,
-    databasePath,
+    databaseUrl,
     connector,
     clock: () => "2026-10-20T00:00:00.000Z",
   };
   return {
-    databasePath,
+    databaseUrl,
     connector,
     getCancelCalls: () => cancelCalls,
     setupProvider: createSubscriptionProviderHandler(dependencies),
@@ -85,7 +85,7 @@ describe("owner-only subscription handlers", () => {
     const context = setup();
     const response = await context.setupProvider(post({ kind: "codex", bindingId: binding.bindingId, model: binding.model }));
     const payload = await response.json() as Record<string, unknown>;
-    const database = openDatabase(context.databasePath);
+    const database = (await openDatabase(context.databaseUrl));
     try {
       expect(response.status).toBe(201);
       expect(response.headers.get("cache-control")).toBe("no-store");
@@ -96,11 +96,11 @@ describe("owner-only subscription handlers", () => {
       expect(JSON.stringify(payload)).not.toContain(binding.executable);
       expect(JSON.stringify(payload)).not.toContain(binding.home);
       expect(JSON.stringify(payload)).not.toContain("secretReference");
-      expect(createRepositories(database).providers.list()).toHaveLength(1);
-      expect(createRepositories(database).accountBindings.getByProviderId((payload.provider as { id: string }).id))
+      expect((await createRepositories(database).providers.list())).toHaveLength(1);
+      expect((await createRepositories(database).accountBindings.getByProviderId((payload.provider as { id: string }).id)))
         .toMatchObject({ bindingId: "codex-owner", state: "not_installed" });
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
@@ -111,11 +111,11 @@ describe("owner-only subscription handlers", () => {
     const duplicate = await context.setupProvider(request());
     expect(duplicate.status).toBe(409);
     expect(await duplicate.json()).toMatchObject({ code: "busy" });
-    const database = openDatabase(context.databasePath);
+    const database = (await openDatabase(context.databaseUrl));
     try {
-      expect(createRepositories(database).providers.list().filter((provider) => provider.kind === "codex")).toHaveLength(1);
+      expect((await createRepositories(database).providers.list()).filter((provider) => provider.kind === "codex")).toHaveLength(1);
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
@@ -152,11 +152,11 @@ describe("owner-only subscription handlers", () => {
     expect(rebound.status).toBe(201);
     const reboundProvider = (await rebound.json() as { provider: { id: string } }).provider;
     expect(reboundProvider.id).toBe(provider.id);
-    const database = openDatabase(context.databasePath);
+    const database = (await openDatabase(context.databaseUrl));
     try {
-      expect(createRepositories(database).accountBindings.getByProviderId(provider.id)?.revision).toBe(1);
+      expect((await createRepositories(database).accountBindings.getByProviderId(provider.id))?.revision).toBe(1);
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
@@ -182,12 +182,12 @@ describe("owner-only subscription handlers", () => {
       checkedAt: "2026-10-20T00:00:01.000Z",
     });
     expect((await lateCheck).status).toBe(409);
-    const database = openDatabase(context.databasePath);
+    const database = (await openDatabase(context.databaseUrl));
     try {
-      expect(createRepositories(database).providers.getById(provider.id)?.status).toBe("not_configured");
-      expect(createRepositories(database).accountBindings.getByProviderId(provider.id)).toBeNull();
+      expect((await createRepositories(database).providers.getById(provider.id))?.status).toBe("not_configured");
+      expect((await createRepositories(database).accountBindings.getByProviderId(provider.id))).toBeNull();
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 });

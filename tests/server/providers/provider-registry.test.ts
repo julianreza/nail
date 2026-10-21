@@ -10,12 +10,12 @@ import { createProviderRegistry } from "../../../lib/server/providers/provider-r
 
 const directories: string[] = [];
 
-function createDatabase(directory: string) {
-  const database = openDatabase(join(directory, "app.sqlite"));
+async function createDatabase(directory: string) {
+  const database = (await openDatabase(join(directory, "app-database")));
   const repositories = createRepositories(database);
-  repositories.projects.create({ id: "project", name: "Nail" });
-  repositories.runs.create({ id: "run", projectId: "project", state: "running" });
-  configureRunUsageBudget(database, { runId: "run", maxRequests: 2, maxToolCalls: 0, maxOutputTokens: 100 });
+  (await repositories.projects.create({ id: "project", name: "Nail" }));
+  (await repositories.runs.create({ id: "run", projectId: "project", state: "running" }));
+  (await configureRunUsageBudget(database, { runId: "run", maxRequests: 2, maxToolCalls: 0, maxOutputTokens: 100 }));
   return { database, repositories };
 }
 
@@ -42,23 +42,23 @@ describe("provider registry text dispatch", () => {
   it("routes by provider kind and never reads a secret store for subscription auth", async () => {
     const directory = mkdtempSync(join(tmpdir(), "nail-provider-registry-"));
     directories.push(directory);
-    const { database, repositories } = createDatabase(directory);
-    const provider = repositories.providers.create({
+    const { database, repositories } = (await createDatabase(directory));
+    const provider = (await repositories.providers.create({
       id: "codex-1",
       name: "Renamed account label",
       kind: "codex",
       status: "ready",
       model: "gpt-codex-model",
       authMode: "subscription_cli",
-    });
-    repositories.accountBindings.create({ providerId: provider.id, bindingId: "codex-owner", state: "ready" });
+    }));
+    (await repositories.accountBindings.create({ providerId: provider.id, bindingId: "codex-owner", state: "ready" }));
     let connectorCalls = 0;
     const connector = subscriptionConnector();
     const trackedConnector: SubscriptionConnector = {
       ...connector,
       complete: async (input, signal) => {
         connectorCalls += 1;
-        return connector.complete(input, signal);
+        return (await connector.complete(input, signal));
       },
     };
     const registry = createProviderRegistry({
@@ -74,21 +74,21 @@ describe("provider registry text dispatch", () => {
         signal: new AbortController().signal,
       })).resolves.toMatchObject({ text: "subscription plan" });
       expect(connectorCalls).toBe(1);
-      expect(repositories.usageRecords.list()).toMatchObject([
+      expect((await repositories.usageRecords.list())).toMatchObject([
         { runId: "run", providerId: provider.id, inputTokens: 9, outputTokens: 3, usageState: "known" },
       ]);
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
   it("preserves DeepSeek routing by stable kind despite a display-name change", async () => {
     const directory = mkdtempSync(join(tmpdir(), "nail-provider-registry-"));
     directories.push(directory);
-    const { database, repositories } = createDatabase(directory);
+    const { database, repositories } = (await createDatabase(directory));
     const secretStore = new EncryptedSecretStore(join(directory, "secrets"), Buffer.alloc(32, 8));
     const secretReference = secretStore.put("local-test-api-key");
-    const provider = repositories.providers.create({
+    const provider = (await repositories.providers.create({
       id: "deepseek-1",
       name: "Owner label",
       kind: "deepseek",
@@ -96,7 +96,7 @@ describe("provider registry text dispatch", () => {
       model: "deepseek-chat",
       authMode: "api_key",
       secretReference,
-    });
+    }));
     let requestCount = 0;
     const registry = createProviderRegistry({
       database,
@@ -121,11 +121,11 @@ describe("provider registry text dispatch", () => {
         signal: new AbortController().signal,
       })).resolves.toMatchObject({ text: "deepseek plan", model: "deepseek-chat" });
       expect(requestCount).toBe(1);
-      expect(repositories.usageRecords.list()).toMatchObject([
+      expect((await repositories.usageRecords.list())).toMatchObject([
         { providerId: provider.id, inputTokens: 5, outputTokens: 2, usageState: "known" },
       ]);
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 });

@@ -11,7 +11,7 @@ if (mode === "echo") {
     const keys = [
       "HOME", "PATH", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "LC_CTYPE",
       "SSL_CERT_FILE", "SSL_CERT_DIR", "CODEX_HOME", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
-      "GEMINI_API_KEY", "NAIL_DATABASE_PATH", "NODE_OPTIONS", "HTTPS_PROXY",
+      "GEMINI_API_KEY", "DATABASE_URL", "DATABASE_CA_CERT_PATH", "NODE_OPTIONS", "HTTPS_PROXY",
     ];
     const env = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
     process.stdout.write(JSON.stringify({ input, env }));

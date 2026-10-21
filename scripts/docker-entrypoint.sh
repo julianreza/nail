@@ -20,6 +20,7 @@ read_secret() {
 read_secret OWNER_PASSWORD_HASH owner_password_hash
 read_secret SESSION_SECRET session_secret
 read_secret NAIL_SECRET_ENCRYPTION_KEY nail_secret_encryption_key
+read_secret DATABASE_URL database_url
 
 mkdir -p /var/lib/nail/secrets
 chown -R 10001:10001 /var/lib/nail

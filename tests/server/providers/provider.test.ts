@@ -24,15 +24,15 @@ function createTempDirectory(): string {
   return directory;
 }
 
-function createDatabase(path: string) {
-  const database = openDatabase(path);
-  createRepositories(database).projects.create({ id: "project-1", name: "Nail" });
-  createRepositories(database).runs.create({
+async function createDatabase(path: string) {
+  const database = (await openDatabase(path));
+  (await createRepositories(database).projects.create({ id: "project-1", name: "Nail" }));
+  (await createRepositories(database).runs.create({
     id: "run-1",
     projectId: "project-1",
     state: "running",
     baselineCommit: "base-1",
-  });
+  }));
   return database;
 }
 
@@ -78,85 +78,85 @@ describe("provider key handling and bounded API calls", () => {
     expect(() => store.get(reference)).toThrow();
   });
 
-  it("reserves request/output budgets before calls and blocks over-limit tool calls", () => {
+  it("reserves request/output budgets before calls and blocks over-limit tool calls", async () => {
     const directory = createTempDirectory();
-    const database = createDatabase(join(directory, "orchestrator.sqlite"));
-    createRepositories(database).providers.create({
+    const database = (await createDatabase(join(directory, "orchestrator-database")));
+    (await createRepositories(database).providers.create({
       id: "provider-1",
       name: "DeepSeek",
       kind: "deepseek",
       status: "ready",
       model: "deepseek-chat",
       authMode: "api_key",
-    });
+    }));
     try {
-      configureRunUsageBudget(database, {
+      (await configureRunUsageBudget(database, {
         runId: "run-1",
         maxRequests: 2,
         maxToolCalls: 1,
         maxOutputTokens: 10,
-      });
-      const first = reserveProviderRequest(database, {
+      }));
+      const first = (await reserveProviderRequest(database, {
         runId: "run-1",
         providerId: "provider-1",
         maxOutputTokens: 7,
-      });
-      expect(createRepositories(database).usageRecords.getById(first.id)?.usageState).toBe("reserved");
-      expect(() =>
-        reserveProviderRequest(database, {
+      }));
+      expect((await createRepositories(database).usageRecords.getById(first.id))?.usageState).toBe("reserved");
+      await expect(async () =>
+        (await reserveProviderRequest(database, {
           runId: "run-1",
           providerId: "provider-1",
           maxOutputTokens: 4,
-        }),
-      ).toThrow();
+        })),
+      ).rejects.toThrow();
       expect(
-        completeProviderUsage(database, first.id, {
+        (await completeProviderUsage(database, first.id, {
           inputTokens: 4,
           outputTokens: 3,
           toolCalls: 1,
-        }).toolCallsAllowed,
+        })).toolCallsAllowed,
       ).toBe(true);
-      expect(createRepositories(database).usageRecords.getById(first.id)?.usageState).toBe("known");
+      expect((await createRepositories(database).usageRecords.getById(first.id))?.usageState).toBe("known");
 
-      const second = reserveProviderRequest(database, {
+      const second = (await reserveProviderRequest(database, {
         runId: "run-1",
         providerId: "provider-1",
         maxOutputTokens: 7,
-      });
+      }));
       expect(
-        completeProviderUsage(database, second.id, {
+        (await completeProviderUsage(database, second.id, {
           inputTokens: 4,
           outputTokens: 3,
           toolCalls: 1,
-        }).toolCallsAllowed,
+        })).toolCallsAllowed,
       ).toBe(false);
-      expect(createRepositories(database).usageRecords.getById(second.id)?.usageState).toBe("known");
-      expect(() =>
-        completeProviderUsage(database, second.id, {
+      expect((await createRepositories(database).usageRecords.getById(second.id))?.usageState).toBe("known");
+      await expect(async () =>
+        (await completeProviderUsage(database, second.id, {
           inputTokens: 0,
           outputTokens: 0,
           toolCalls: 0,
-        }),
-      ).toThrow(/already settled/);
-      expect(() =>
-        reserveProviderRequest(database, {
+        })),
+      ).rejects.toThrow(/already settled/);
+      await expect(async () =>
+        (await reserveProviderRequest(database, {
           runId: "run-1",
           providerId: "provider-1",
           maxOutputTokens: 1,
-        }),
-      ).toThrow();
+        })),
+      ).rejects.toThrow();
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
   it("sends the key only in the HTTPS authorization header and returns typed completion", async () => {
     const directory = createTempDirectory();
-    const database = createDatabase(join(directory, "orchestrator.sqlite"));
+    const database = (await createDatabase(join(directory, "orchestrator-database")));
     const store = new EncryptedSecretStore(join(directory, "secrets"), Buffer.alloc(32, 8));
     const apiKey = "sk-provider-key-never-return-this";
     const secretReference = store.put(apiKey);
-    createRepositories(database).providers.create({
+    (await createRepositories(database).providers.create({
       id: "provider-1",
       name: "DeepSeek",
       kind: "deepseek",
@@ -165,13 +165,13 @@ describe("provider key handling and bounded API calls", () => {
       authMode: "api_key",
       secretReference,
       capabilities: ["tools", "streaming"],
-    });
-    configureRunUsageBudget(database, {
+    }));
+    (await configureRunUsageBudget(database, {
       runId: "run-1",
       maxRequests: 2,
       maxToolCalls: 2,
       maxOutputTokens: 20,
-    });
+    }));
     let capturedUrl = "";
     let capturedAuthorization = "";
     let capturedBody: Record<string, unknown> = {};
@@ -203,16 +203,16 @@ describe("provider key handling and bounded API calls", () => {
         usage: { inputTokens: 5, outputTokens: 3 },
       });
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
   it("streams text responses and finalizes usage when the provider supplies token totals", async () => {
     const directory = createTempDirectory();
-    const database = createDatabase(join(directory, "orchestrator.sqlite"));
+    const database = (await createDatabase(join(directory, "orchestrator-database")));
     const store = new EncryptedSecretStore(join(directory, "secrets"), Buffer.alloc(32, 12));
     const secretReference = store.put("provider-stream-secret-test");
-    createRepositories(database).providers.create({
+    (await createRepositories(database).providers.create({
       id: "provider-1",
       name: "DeepSeek",
       kind: "deepseek",
@@ -221,13 +221,13 @@ describe("provider key handling and bounded API calls", () => {
       authMode: "api_key",
       secretReference,
       capabilities: ["streaming"],
-    });
-    configureRunUsageBudget(database, {
+    }));
+    (await configureRunUsageBudget(database, {
       runId: "run-1",
       maxRequests: 2,
       maxToolCalls: 0,
       maxOutputTokens: 20,
-    });
+    }));
     const chunks = [
       'data: {"choices":[{"delta":{"content":"hello provider-stream-',
       'secret-test"}}]}\n\n',
@@ -262,19 +262,19 @@ describe("provider key handling and bounded API calls", () => {
       const content = await new Response(result.stream).text();
       expect(content).toContain('"content":"hello [REDACTED]"');
       expect(content).not.toContain("provider-stream-secret-test");
-      const usage = createRepositories(database).usageRecords.getById(result.reservationId);
+      const usage = (await createRepositories(database).usageRecords.getById(result.reservationId));
       expect(usage).toMatchObject({ inputTokens: 5, outputTokens: 3, usageState: "known" });
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
   it("rejects unsupported tools before requesting and never falls back on provider errors", async () => {
     const directory = createTempDirectory();
-    const database = createDatabase(join(directory, "orchestrator.sqlite"));
+    const database = (await createDatabase(join(directory, "orchestrator-database")));
     const store = new EncryptedSecretStore(join(directory, "secrets"), Buffer.alloc(32, 5));
     const secretReference = store.put("sk-secret");
-    createRepositories(database).providers.create({
+    (await createRepositories(database).providers.create({
       id: "provider-1",
       name: "DeepSeek",
       kind: "deepseek",
@@ -283,13 +283,13 @@ describe("provider key handling and bounded API calls", () => {
       authMode: "api_key",
       secretReference,
       capabilities: [],
-    });
-    configureRunUsageBudget(database, {
+    }));
+    (await configureRunUsageBudget(database, {
       runId: "run-1",
       maxRequests: 4,
       maxToolCalls: 1,
       maxOutputTokens: 50,
-    });
+    }));
     let fetchCount = 0;
     const adapter = new DeepSeekAdapter({
       database,
@@ -311,7 +311,7 @@ describe("provider key handling and bounded API calls", () => {
       ).rejects.toThrow(/tool/i);
       expect(fetchCount).toBe(0);
 
-      createRepositories(database).providers.create({
+      (await createRepositories(database).providers.create({
         id: "provider-2",
         name: "DeepSeek",
         kind: "deepseek",
@@ -320,7 +320,7 @@ describe("provider key handling and bounded API calls", () => {
         authMode: "api_key",
         secretReference,
         capabilities: ["tools"],
-      });
+      }));
       await expect(
         adapter.complete({
           runId: "run-1",
@@ -330,11 +330,11 @@ describe("provider key handling and bounded API calls", () => {
         }),
       ).rejects.toBeInstanceOf(ProviderAuthenticationError);
       expect(fetchCount).toBe(1);
-      expect(createRepositories(database).providers.getById("provider-2")?.status).toBe(
+      expect((await createRepositories(database).providers.getById("provider-2"))?.status).toBe(
         "needs_login",
       );
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
@@ -344,10 +344,10 @@ describe("provider key handling and bounded API calls", () => {
       [503, ProviderUnavailableError, "unavailable"],
     ] as const) {
       const directory = createTempDirectory();
-      const database = createDatabase(join(directory, "orchestrator.sqlite"));
+      const database = (await createDatabase(join(directory, "orchestrator-database")));
       const store = new EncryptedSecretStore(join(directory, "secrets"), Buffer.alloc(32, status % 255));
       const secretReference = store.put("sk-billing-test");
-      createRepositories(database).providers.create({
+      (await createRepositories(database).providers.create({
         id: "provider-1",
         name: "DeepSeek",
         kind: "deepseek",
@@ -356,13 +356,13 @@ describe("provider key handling and bounded API calls", () => {
         authMode: "api_key",
         secretReference,
         capabilities: ["tools"],
-      });
-      configureRunUsageBudget(database, {
+      }));
+      (await configureRunUsageBudget(database, {
         runId: "run-1",
         maxRequests: 2,
         maxToolCalls: 1,
         maxOutputTokens: 20,
-      });
+      }));
       let fetchCount = 0;
       const adapter = new DeepSeekAdapter({
         database,
@@ -382,11 +382,11 @@ describe("provider key handling and bounded API calls", () => {
           }),
         ).rejects.toBeInstanceOf(ErrorType);
         expect(fetchCount).toBe(1);
-        expect(createRepositories(database).providers.getById("provider-1")?.status).toBe(
+        expect((await createRepositories(database).providers.getById("provider-1"))?.status).toBe(
           connectionStatus,
         );
       } finally {
-        database.close();
+        (await database.close());
       }
     }
   });

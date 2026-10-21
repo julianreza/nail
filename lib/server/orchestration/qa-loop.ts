@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "../db/database";
 import { canTransitionRunState } from "../../domain/run-state";
 import { createRepositories } from "../db/repositories";
 import { withTransaction } from "../db/database";
@@ -34,15 +34,15 @@ function isTextList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
-export function recordQaRound(database: DatabaseSync, input: QaRoundInput) {
+export async function recordQaRound(database: Database, input: QaRoundInput) {
   if (input.details.length > 5000) throw new Error("QA details are too long");
-  return withTransaction(database, () => {
+  return (await withTransaction(database, async () => {
     const repositories = createRepositories(database);
-    const run = repositories.runs.getById(input.runId);
+    const run = (await repositories.runs.getById(input.runId));
     if (!run || run.state !== "awaiting_review") {
       throw new Error("QA may only review a run awaiting review");
     }
-    const plan = repositories.runPlans.getByRunId(input.runId);
+    const plan = (await repositories.runPlans.getByRunId(input.runId));
     if (!plan || plan.planVersion !== run.planVersion) {
       throw new Error("Run plan is missing or stale");
     }
@@ -54,7 +54,7 @@ export function recordQaRound(database: DatabaseSync, input: QaRoundInput) {
       plan.verificationCommandsJson,
       "verification command list",
     );
-    const existingRounds = repositories.qaRounds.listForRun(input.runId);
+    const existingRounds = (await repositories.qaRounds.listForRun(input.runId));
     const roundNumber = (existingRounds.at(-1)?.roundNumber ?? 0) + 1;
     const roundId = randomUUID();
 
@@ -80,26 +80,26 @@ export function recordQaRound(database: DatabaseSync, input: QaRoundInput) {
         ) {
           throw new Error("QA finding is invalid");
         }
-        const task = repositories.tasks.getById(finding.taskId);
+        const task = (await repositories.tasks.getById(finding.taskId));
         if (!task || task.runId !== input.runId || task.state !== "done" || !task.ownerAgentId) {
           throw new Error("QA finding must refer to a completed engineer task");
         }
-        const owner = repositories.agents.getById(task.ownerAgentId);
+        const owner = (await repositories.agents.getById(task.ownerAgentId));
         if (!owner || !/front|back|engineer/i.test(owner.role)) {
           throw new Error("QA repair must route to the task's engineer owner");
         }
         repairTasks.push({ finding, originalTaskId: task.id, ownerAgentId: owner.id });
       }
 
-      repositories.qaRounds.create({
+      (await repositories.qaRounds.create({
         id: roundId,
         runId: input.runId,
         roundNumber,
         status: "failed",
         details: input.details,
-      });
+      }));
       for (const repair of repairTasks) {
-        repositories.qaResults.create({
+        (await repositories.qaResults.create({
           id: randomUUID(),
           runId: input.runId,
           taskId: repair.originalTaskId,
@@ -109,40 +109,40 @@ export function recordQaRound(database: DatabaseSync, input: QaRoundInput) {
             roundNumber,
             summary: repair.finding.summary,
           }),
-        });
+        }));
       }
 
       const repairTaskIds: string[] = [];
       if (!isLimitReached) {
-        const nextPosition = repositories.tasks.listForRun(input.runId).reduce(
+        const nextPosition = (await repositories.tasks.listForRun(input.runId)).reduce(
           (maximum, task) => Math.max(maximum, task.position),
           -1,
         ) + 1;
         const insertDependency = database.prepare(
-          "INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES (?, ?)",
+          "INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES ($1, $2)",
         );
         for (const [offset, repair] of repairTasks.entries()) {
-          const repairTask = repositories.tasks.create({
+          const repairTask = (await repositories.tasks.create({
             id: randomUUID(),
             runId: input.runId,
             ownerAgentId: repair.ownerAgentId,
             title: `QA fix: ${repair.finding.summary.slice(0, 270)}`,
             state: "queued",
             position: nextPosition + offset,
-          });
-          insertDependency.run(repairTask.id, repair.originalTaskId);
+          }));
+          (await insertDependency.run(repairTask.id, repair.originalTaskId));
           repairTaskIds.push(repairTask.id);
         }
       }
 
-      const stateChange = database
+      const stateChange = (await database
         .prepare(
-          `UPDATE runs SET state = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-           WHERE id = ? AND state = 'awaiting_review'`,
+          `UPDATE runs SET state = $1, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $2 AND state = 'awaiting_review'`,
         )
-        .run(nextState, input.runId);
+        .run(nextState, input.runId));
       if (stateChange.changes !== 1) throw new Error("Run changed while recording QA failure");
-      repositories.events.append({
+      (await repositories.events.append({
         runId: input.runId,
         eventType: isLimitReached ? "qa.retry_limit_reached" : "qa.repair_tasks_created",
         payload: {
@@ -151,7 +151,7 @@ export function recordQaRound(database: DatabaseSync, input: QaRoundInput) {
           repairTaskIds,
           runState: nextState,
         },
-      });
+      }));
       return { roundNumber, runState: nextState, repairTaskIds, evidenceComplete: false };
     }
 
@@ -179,76 +179,76 @@ export function recordQaRound(database: DatabaseSync, input: QaRoundInput) {
       throw new Error("Manual completion verification must come from the owner");
     }
 
-    repositories.qaRounds.create({
+    (await repositories.qaRounds.create({
       id: roundId,
       runId: input.runId,
       roundNumber,
       status: "passed",
       details: input.details,
-    });
+    }));
     for (const criterion of criteria) {
-      repositories.qaResults.create({
+      (await repositories.qaResults.create({
         id: randomUUID(),
         runId: input.runId,
         status: verifiedCriteriaIds.includes(criterion.id) ? "verified" : "not-run",
         details: JSON.stringify({ kind: "acceptance", criterionId: criterion.id, roundNumber }),
-      });
+      }));
     }
     for (const command of requiredCommands) {
-      repositories.qaResults.create({
+      (await repositories.qaResults.create({
         id: randomUUID(),
         runId: input.runId,
         status: verifiedCommands.includes(command) ? "verified" : "not-run",
         details: JSON.stringify({ kind: "verification", command, roundNumber }),
-      });
+      }));
     }
     if (requiredCommands.length === 0) {
-      repositories.qaResults.create({
+      (await repositories.qaResults.create({
         id: randomUUID(),
         runId: input.runId,
         status: input.manualVerificationConfirmed && input.manualVerificationActor === "owner"
           ? "verified"
           : "not-run",
         details: JSON.stringify({ kind: "manual", roundNumber }),
-      });
+      }));
     }
     const criteriaComplete = criteria.every((criterion) => verifiedCriteriaIds.includes(criterion.id));
     const commandsComplete = requiredCommands.every((command) => verifiedCommands.includes(command));
     const manualComplete = requiredCommands.length > 0 ||
       (input.manualVerificationConfirmed === true && input.manualVerificationActor === "owner");
-    repositories.events.append({
+    (await repositories.events.append({
       runId: input.runId,
       eventType: "qa.round_passed",
       payload: { roundNumber, criteriaComplete, commandsComplete, manualComplete },
-    });
+    }));
     return {
       roundNumber,
       runState: run.state,
       repairTaskIds: [],
       evidenceComplete: criteriaComplete && commandsComplete && manualComplete,
     };
-  });
+  }));
 }
 
-export function finalizeVerifiedRun(
-  database: DatabaseSync,
+export async function finalizeVerifiedRun(
+  database: Database,
   runId: string,
   options: { manualVerificationConfirmed: boolean; manualVerificationActor?: "owner" | "model" },
-): boolean {
-  return withTransaction(database, () => {
+): Promise<boolean> {
+  return (await withTransaction(database, async () => {
     const repositories = createRepositories(database);
-    const run = repositories.runs.getById(runId);
-    const plan = repositories.runPlans.getByRunId(runId);
+    const run = (await repositories.runs.getById(runId));
+    const plan = (await repositories.runPlans.getByRunId(runId));
     if (!run || run.state !== "awaiting_review" || !plan || plan.planVersion !== run.planVersion) {
       return false;
     }
-    if (repositories.tasks.listForRun(runId).some((task) => task.state !== "done")) return false;
-    const latestRound = repositories.qaRounds.listForRun(runId).at(-1);
+    if ((await repositories.tasks.listForRun(runId)).some((task) => task.state !== "done")) return false;
+    const latestRound = (await repositories.qaRounds.listForRun(runId)).at(-1);
     if (!latestRound || latestRound.status !== "passed") return false;
 
     const criteria = parseJson<Array<{ id: string }>>(plan.acceptanceCriteriaJson, "acceptance criteria");
     const commands = parseJson<string[]>(plan.verificationCommandsJson, "verification command list");
-    const qaResults = repositories.qaResults.list().filter((result) => result.runId === runId);
+    const qaResults = (await repositories.qaResults.list()).filter((result) => result.runId === runId);
     const evidence = qaResults
       .map((result) => ({ result, details: parseJson<Record<string, unknown>>(result.details, "QA evidence") }))
       .filter(({ details }) => details.roundNumber === latestRound.roundNumber);
@@ -269,14 +269,14 @@ export function finalizeVerifiedRun(
     );
     if (!criteriaVerified || !commandsVerified || !manualVerified) return false;
 
-    const changed = database
+    const changed = (await database
       .prepare(
-        `UPDATE runs SET state = 'done', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE id = ? AND state = 'awaiting_review' AND plan_version = ? AND baseline_commit IS ?`,
+        `UPDATE runs SET state = 'done', updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1 AND state = 'awaiting_review' AND plan_version = $2 AND baseline_commit IS NOT DISTINCT FROM $3`,
       )
-      .run(runId, plan.planVersion, run.baselineCommit);
+      .run(runId, plan.planVersion, run.baselineCommit));
     if (changed.changes !== 1) return false;
-    repositories.events.append({
+    (await repositories.events.append({
       runId,
       eventType: "run.verified_complete",
       payload: {
@@ -285,7 +285,7 @@ export function finalizeVerifiedRun(
         verifiedCommands: commands,
         manualVerification: commands.length === 0,
       },
-    });
+    }));
     return true;
-  });
+  }));
 }

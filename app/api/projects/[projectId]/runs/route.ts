@@ -19,7 +19,7 @@ export async function GET(
     );
   }
   const { projectId } = await params;
-  return createProjectRunsReadHandler(auth, process.env.NAIL_DATABASE_PATH)(projectId, request);
+  return createProjectRunsReadHandler(auth, process.env.DATABASE_URL)(projectId, request);
 }
 
 export async function POST(
@@ -43,7 +43,7 @@ export async function POST(
     return await createRunRequestHandler({
       auth,
       appOrigin: process.env.APP_ORIGIN,
-      databasePath: process.env.NAIL_DATABASE_PATH,
+      databaseUrl: process.env.DATABASE_URL,
       policy,
       createPlanGenerator(database) {
         const registry = createProviderRegistry({

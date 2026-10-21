@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "../db/database";
 import { isSameOriginRequest } from "../auth/auth-service";
 import { openDatabase, createRepositories } from "../db/database";
 import type { RunPlanPolicy } from "./run-request";
@@ -32,9 +32,9 @@ interface AuthGuard {
 interface RunRequestHandlerDependencies {
   auth: AuthGuard;
   appOrigin: string | undefined;
-  databasePath: string | undefined;
+  databaseUrl: string | undefined;
   policy: RunPlanPolicy;
-  createPlanGenerator(database: DatabaseSync): PlanGenerator;
+  createPlanGenerator(database: Database): PlanGenerator;
 }
 
 function json(value: unknown, status: number): Response {
@@ -119,7 +119,7 @@ export function createRunRequestHandler(dependencies: RunRequestHandlerDependenc
     if (request.headers.get("content-type")?.split(";")[0] !== "application/json") {
       return json({ error: "Unsupported content type" }, 415);
     }
-    if (!dependencies.databasePath) return json({ error: "Database is not configured" }, 503);
+    if (!dependencies.databaseUrl) return json({ error: "Database is not configured" }, 503);
     if (typeof projectId !== "string" || !projectId || projectId.length > 128) {
       return json({ error: "Project not found" }, 404);
     }
@@ -135,10 +135,10 @@ export function createRunRequestHandler(dependencies: RunRequestHandlerDependenc
     const body = parseBody(parsed);
     if (!body) return json({ error: "Run request is invalid" }, 400);
 
-    let database: DatabaseSync | undefined;
+    let database: Database | undefined;
     try {
-      database = openDatabase(dependencies.databasePath);
-      const project = createRepositories(database).projects.getById(projectId);
+      database = (await openDatabase(dependencies.databaseUrl));
+      const project = (await createRepositories(database).projects.getById(projectId));
       if (!project) return json({ error: "Project not found" }, 404);
       const result = await createRunPlanFromGoal(
         database,
@@ -150,7 +150,7 @@ export function createRunRequestHandler(dependencies: RunRequestHandlerDependenc
     } catch (error) {
       return errorResponse(error);
     } finally {
-      database?.close();
+      (await database?.close());
     }
   };
 }

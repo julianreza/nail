@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "../db/database";
 import { validateTaskDag } from "../../domain/task-dag";
 import { createRepositories } from "../db/repositories";
 import { withTransaction } from "../db/database";
@@ -159,17 +159,17 @@ function normalizeProposal(value: unknown, context: PlanValidationContext): Mode
   return { goal, acceptanceCriteria, subtasks };
 }
 
-export function validatePlanProposal(
-  database: DatabaseSync,
+export async function validatePlanProposal(
+  database: Database,
   runId: string,
   proposal: unknown,
   context: PlanValidationContext,
-): ValidatedPlan {
+): Promise<ValidatedPlan> {
   const repositories = createRepositories(database);
-  const run = repositories.runs.getById(runId);
+  const run = (await repositories.runs.getById(runId));
   if (!run || run.state !== "draft") throw new Error("Only draft runs can receive a plan");
   const plan = normalizeProposal(proposal, context);
-  const agents = repositories.agents.list();
+  const agents = (await repositories.agents.list());
   const projectAgentIds = new Set(
     agents
       .filter((agent) => agent.projectId === null || agent.projectId === run.projectId)
@@ -178,7 +178,7 @@ export function validatePlanProposal(
   if (plan.subtasks.some((task) => !projectAgentIds.has(task.ownerAgentId))) {
     throw new Error("Every subtask owner must be an agent in this project");
   }
-  if (repositories.runPlans.getByRunId(runId)) {
+  if ((await repositories.runPlans.getByRunId(runId))) {
     throw new Error("This run already has a submitted plan");
   }
   return {
@@ -190,14 +190,14 @@ export function validatePlanProposal(
   };
 }
 
-export function proposePlanForApproval(
-  database: DatabaseSync,
+export async function proposePlanForApproval(
+  database: Database,
   runId: string,
   proposal: unknown,
   context: PlanValidationContext,
 ) {
   const repositories = createRepositories(database);
-  const validatedPlan = validatePlanProposal(database, runId, proposal, context);
+  const validatedPlan = (await validatePlanProposal(database, runId, proposal, context));
   const scope: ApprovalScope = {
     planVersion: validatedPlan.planVersion,
     baselineCommit: validatedPlan.baselineCommit,
@@ -211,8 +211,8 @@ export function proposePlanForApproval(
     allowedPermissions: context.allowedPermissions,
   });
 
-  const approval = approvals.submitForApproval(runId, scope, (createdApproval) => {
-    repositories.runPlans.create({
+  const approval = (await approvals.submitForApproval(runId, scope, async (createdApproval) => {
+    (await repositories.runPlans.create({
       runId,
       planVersion: validatedPlan.planVersion,
       goal: validatedPlan.goal,
@@ -222,27 +222,27 @@ export function proposePlanForApproval(
       allowedToolsJson: JSON.stringify(context.allowedTools),
       approvalId: createdApproval.id,
       approvalFingerprint: createdApproval.payloadFingerprint,
-    });
+    }));
 
     for (const [position, task] of validatedPlan.subtasks.entries()) {
-      repositories.tasks.create({
+      (await repositories.tasks.create({
         id: taskIds.get(task.id)!,
         runId,
         ownerAgentId: task.ownerAgentId,
         title: task.title,
         state: "queued",
         position,
-      });
+      }));
     }
     const insertDependency = database.prepare(
-      "INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES (?, ?)",
+      "INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES ($1, $2)",
     );
     for (const task of validatedPlan.subtasks) {
       for (const dependencyId of task.dependsOn) {
-        insertDependency.run(taskIds.get(task.id)!, taskIds.get(dependencyId)!);
+        (await insertDependency.run(taskIds.get(task.id)!, taskIds.get(dependencyId)!));
       }
     }
-    repositories.events.append({
+    (await repositories.events.append({
       runId,
       eventType: "plan.submitted",
       payload: {
@@ -251,8 +251,8 @@ export function proposePlanForApproval(
         taskCount: validatedPlan.subtasks.length,
         acceptanceCriteriaIds: validatedPlan.acceptanceCriteria.map((item) => item.id),
       },
-    });
-  });
+    }));
+  }));
 
   return {
     approval,
@@ -266,42 +266,42 @@ export function proposePlanForApproval(
   };
 }
 
-export function selectNextReadyTask(database: DatabaseSync, runId: string) {
+export async function selectNextReadyTask(database: Database, runId: string) {
   const repositories = createRepositories(database);
-  const run = repositories.runs.getById(runId);
+  const run = (await repositories.runs.getById(runId));
   if (!run || run.state !== "running") throw new Error("Only a running run can schedule tasks");
-  const tasks = repositories.tasks.listForRun(runId);
+  const tasks = (await repositories.tasks.listForRun(runId));
   if (tasks.some((task) => task.state === "running")) return null;
   const dag = validateTaskDag(
-    tasks.map((task) => ({
+    await Promise.all(tasks.map(async (task) => ({
       id: task.id,
-      dependsOn: repositories.taskDependencies.listForTask(task.id).map((dependency) => dependency.dependsOnTaskId),
-    })),
+      dependsOn: (await repositories.taskDependencies.listForTask(task.id)).map((dependency) => dependency.dependsOnTaskId),
+    }))),
   );
   if (!dag.valid) throw new Error(`Persisted task graph is invalid: ${dag.reason}`);
   const byId = new Map(tasks.map((task) => [task.id, task]));
-  return tasks.find((task) =>
-    task.state === "queued" &&
-    repositories.taskDependencies
-      .listForTask(task.id)
-      .every((dependency) => byId.get(dependency.dependsOnTaskId)?.state === "done"),
-  ) ?? null;
+  for (const task of tasks) {
+    if (task.state !== "queued") continue;
+    const dependencies = await repositories.taskDependencies.listForTask(task.id);
+    if (dependencies.every((dependency) => byId.get(dependency.dependsOnTaskId)?.state === "done")) return task;
+  }
+  return null;
 }
 
-export function setTaskState(
-  database: DatabaseSync,
+export async function setTaskState(
+  database: Database,
   taskId: string,
   nextState: "running" | "done" | "failed" | "blocked" | "cancelled",
   actor: string,
-): void {
+): Promise<void> {
   if (actor !== "worker" && actor !== "system") {
     throw new Error("Model output cannot change task state");
   }
-  withTransaction(database, () => {
+  (await withTransaction(database, async () => {
     const repositories = createRepositories(database);
-    const task = repositories.tasks.getById(taskId);
+    const task = (await repositories.tasks.getById(taskId));
     if (!task) throw new Error("Task does not exist");
-    const run = repositories.runs.getById(task.runId);
+    const run = (await repositories.runs.getById(task.runId));
     if (!run || run.state !== "running") throw new Error("Task updates require a running run");
     const allowed: Record<string, readonly string[]> = {
       queued: ["running", "blocked", "cancelled"],
@@ -310,17 +310,17 @@ export function setTaskState(
     if (!allowed[task.state]?.includes(nextState)) {
       throw new Error("Task state transition is not allowed");
     }
-    if (nextState === "running" && selectNextReadyTask(database, task.runId)?.id !== taskId) {
+    if (nextState === "running" && (await selectNextReadyTask(database, task.runId))?.id !== taskId) {
       throw new Error("Only the next ready task can start; execution must be serial");
     }
-    const changed = database
-      .prepare("UPDATE tasks SET state = ? WHERE id = ? AND state = ?")
-      .run(nextState, taskId, task.state);
+    const changed = (await database
+      .prepare("UPDATE tasks SET state = $1 WHERE id = $2 AND state = $3")
+      .run(nextState, taskId, task.state));
     if (changed.changes !== 1) throw new Error("Task state changed concurrently");
-    repositories.events.append({
+    (await repositories.events.append({
       runId: task.runId,
       eventType: "task.state_changed",
       payload: { taskId, from: task.state, to: nextState, actor },
-    });
-  });
+    }));
+  }));
 }

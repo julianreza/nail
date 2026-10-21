@@ -12,7 +12,7 @@ interface ProviderSetupAuth {
 interface ProviderSetupDependencies {
   auth: ProviderSetupAuth;
   appOrigin: string | undefined;
-  databasePath: string | undefined;
+  databaseUrl: string | undefined;
   createSecretStore?: typeof createSecretStoreFromEnvironment;
   fetcher?: typeof fetch;
 }
@@ -65,7 +65,7 @@ export function createProviderSetupHandler(dependencies: ProviderSetupDependenci
     if (request.headers.get("content-type")?.split(";")[0] !== "application/json") {
       return json({ error: "Unsupported content type" }, 415);
     }
-    if (!dependencies.databasePath) return json({ error: "Provider setup is not configured" }, 503);
+    if (!dependencies.databaseUrl) return json({ error: "Provider setup is not configured" }, 503);
 
     const raw = await readBody(request);
     if (raw === null) return json({ error: "Request body is invalid or too large" }, 413);
@@ -79,10 +79,10 @@ export function createProviderSetupHandler(dependencies: ProviderSetupDependenci
       return json({ error: "Invalid request" }, 400);
     }
 
-    let database: ReturnType<typeof openDatabase> | undefined;
+    let database: Awaited<ReturnType<typeof openDatabase>> | undefined;
     try {
       const secretStore = (dependencies.createSecretStore ?? createSecretStoreFromEnvironment)();
-      database = openDatabase(dependencies.databasePath);
+      database = (await openDatabase(dependencies.databaseUrl));
       const provider = await createDeepSeekProviderSetup(
         database,
         secretStore,
@@ -99,7 +99,7 @@ export function createProviderSetupHandler(dependencies: ProviderSetupDependenci
       }
       return json({ error: "Provider setup is unavailable" }, 503);
     } finally {
-      database?.close();
+      await database?.close();
     }
   };
 }

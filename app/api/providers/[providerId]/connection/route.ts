@@ -20,7 +20,7 @@ export async function POST(
     return createProviderConnectionHandler({
       auth,
       appOrigin: process.env.APP_ORIGIN,
-      databasePath: process.env.NAIL_DATABASE_PATH,
+      databaseUrl: process.env.DATABASE_URL,
 
       connector: createLocalSubscriptionConnector(),
     })(providerId, request);

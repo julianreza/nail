@@ -1,25 +1,26 @@
 import { describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
 import { openDatabase, createRepositories } from "../../../lib/server/db/database";
 import { createApprovalService, type ApprovalScope } from "../../../lib/server/runs/approval-service";
 import { claimNextJob } from "../../../lib/server/queue/queue-service";
 import { runTaskToolLoop, type TaskModelReply } from "../../../lib/server/orchestration/tool-loop";
 
-function fixture() {
-  const db = openDatabase(":memory:");
+async function fixture() {
+  const db = (await openDatabase(`tool-loop-${randomUUID()}`));
   const repos = createRepositories(db);
-  repos.projects.create({ id: "p", name: "Project" });
-  repos.agents.create({ id: "a", projectId: "p", name: "Engineer", role: "engineer" });
-  repos.runs.create({ id: "r", projectId: "p", state: "draft" });
+  (await repos.projects.create({ id: "p", name: "Project" }));
+  (await repos.agents.create({ id: "a", projectId: "p", name: "Engineer", role: "engineer" }));
+  (await repos.runs.create({ id: "r", projectId: "p", state: "draft" }));
   const scope: ApprovalScope = {
     planVersion: 1, baselineCommit: null, setupCommands: [],
     verificationCommands: ["printf verified"], permissions: ["terminal:execute"],
     costLimitMicrounits: 100,
   };
   const service = createApprovalService(db, { allowedPermissions: scope.permissions });
-  const approval = service.submitForApproval("r", scope);
-  service.decide(approval.id, { decision: "approved", expectedFingerprint: approval.payloadFingerprint });
-  claimNextJob(db, { workerId: "worker", now: new Date().toISOString(), leaseDurationMs: 30_000 });
-  repos.tasks.create({ id: "t", runId: "r", ownerAgentId: "a", title: "Verify", state: "running" });
+  const approval = (await service.submitForApproval("r", scope));
+  (await service.decide(approval.id, { decision: "approved", expectedFingerprint: approval.payloadFingerprint }));
+  (await claimNextJob(db, { workerId: "worker", now: new Date().toISOString(), leaseDurationMs: 30_000 }));
+  (await repos.tasks.create({ id: "t", runId: "r", ownerAgentId: "a", title: "Verify", state: "running" }));
   return { db, repos, scope };
 }
 
@@ -30,7 +31,7 @@ const call: TaskModelReply = {
 
 describe("bounded sandbox tool loop", () => {
   it("feeds real command results back to the model and records exit evidence", async () => {
-    const { db, repos, scope } = fixture();
+    const { db, repos, scope } = (await fixture());
     let requests = 0;
     let commands = 0;
     try {
@@ -54,18 +55,18 @@ describe("bounded sandbox tool loop", () => {
       expect(result).toMatchObject({ reason: "model_finished", modelRequests: 2, toolCalls: 1 });
       expect(result.failedCommands).toBe(0);
       expect(commands).toBe(1);
-      expect(repos.events.listAfter("r", 0).some((event) => event.eventType === "tool.completed")).toBe(true);
-      expect(repos.tasks.getById("t")?.state).toBe("running");
-    } finally { db.close(); }
+      expect((await repos.events.listAfter("r", 0)).some((event) => event.eventType === "tool.completed")).toBe(true);
+      expect((await repos.tasks.getById("t"))?.state).toBe("running");
+    } finally { (await db.close()); }
   });
 
   it.each(["unapproved command", "wrong lease", "stale baseline", "cancelled"])(
     "blocks %s before sandbox side effects", async (condition) => {
-      const { db, scope } = fixture();
+      const { db, scope } = (await fixture());
       let commands = 0;
       const controller = new AbortController();
-      if (condition === "wrong lease") db.prepare("UPDATE leases SET worker_id = 'other'").run();
-      if (condition === "stale baseline") db.prepare("UPDATE runs SET baseline_commit = 'changed'").run();
+      if (condition === "wrong lease") (await db.prepare("UPDATE leases SET worker_id = 'other'").run());
+      if (condition === "stale baseline") (await db.prepare("UPDATE runs SET baseline_commit = 'changed'").run());
       if (condition === "cancelled") controller.abort();
       try {
         await expect(runTaskToolLoop({
@@ -81,12 +82,12 @@ describe("bounded sandbox tool loop", () => {
           },
         })).rejects.toThrow();
         expect(commands).toBe(0);
-      } finally { db.close(); }
+      } finally { (await db.close()); }
     },
   );
 
   it("rejects duplicate tool-call IDs without replaying the command", async () => {
-    const { db, scope } = fixture();
+    const { db, scope } = (await fixture());
     let commands = 0;
     try {
       await expect(runTaskToolLoop({
@@ -99,11 +100,11 @@ describe("bounded sandbox tool loop", () => {
         },
       })).rejects.toThrow(/duplicate/i);
       expect(commands).toBe(1);
-    } finally { db.close(); }
+    } finally { (await db.close()); }
   });
 
   it("stops at the request cap instead of looping indefinitely", async () => {
-    const { db, scope } = fixture();
+    const { db, scope } = (await fixture());
     try {
       const result = await runTaskToolLoop({
         database: db, runId: "r", taskId: "t", workerId: "worker", scope,
@@ -112,11 +113,11 @@ describe("bounded sandbox tool loop", () => {
         executeInSandbox: async () => ({ exitCode: 0, stdout: "ok", stderr: "", outputTruncated: false }),
       });
       expect(result.reason).toBe("request_limit");
-    } finally { db.close(); }
+    } finally { (await db.close()); }
   });
 
   it("reports non-zero command results so the executor cannot treat them as task success", async () => {
-    const { db, scope } = fixture();
+    const { db, scope } = (await fixture());
     let requests = 0;
     try {
       const result = await runTaskToolLoop({
@@ -127,6 +128,6 @@ describe("bounded sandbox tool loop", () => {
       });
       expect(result.reason).toBe("model_finished");
       expect(result.failedCommands).toBe(1);
-    } finally { db.close(); }
+    } finally { (await db.close()); }
   });
 });

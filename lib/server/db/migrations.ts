@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import { type Database, withTransaction } from "./database";
 
 interface Migration {
   version: number;
@@ -17,7 +17,7 @@ const migrations: readonly Migration[] = [
         repo_url TEXT,
         baseline_ref TEXT,
         baseline_commit TEXT,
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
       );
 
       CREATE TABLE providers (
@@ -28,7 +28,7 @@ const migrations: readonly Migration[] = [
         auth_mode TEXT NOT NULL CHECK (auth_mode IN ('api_key', 'subscription_cli', 'none')),
         secret_reference TEXT,
         capabilities_json TEXT NOT NULL DEFAULT '[]',
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
       );
 
       CREATE TABLE agents (
@@ -38,16 +38,7 @@ const migrations: readonly Migration[] = [
         name TEXT NOT NULL,
         role TEXT NOT NULL,
         instructions TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-      );
-
-      CREATE TABLE conversations (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-        run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
-        actor TEXT NOT NULL,
-        content TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
       );
 
       CREATE TABLE runs (
@@ -56,8 +47,17 @@ const migrations: readonly Migration[] = [
         state TEXT NOT NULL CHECK (state IN ('draft', 'awaiting_approval', 'queued', 'running', 'awaiting_review', 'blocked', 'interrupted', 'failed', 'done', 'cancelled')),
         plan_version INTEGER NOT NULL DEFAULT 1 CHECK (plan_version > 0),
         baseline_commit TEXT,
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')),
+        updated_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
+      );
+
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+        actor TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
       );
 
       CREATE TABLE tasks (
@@ -67,7 +67,7 @@ const migrations: readonly Migration[] = [
         title TEXT NOT NULL,
         state TEXT NOT NULL DEFAULT 'queued',
         position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0),
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
       );
 
       CREATE TABLE task_dependencies (
@@ -82,7 +82,7 @@ const migrations: readonly Migration[] = [
         run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
         payload_fingerprint TEXT NOT NULL,
         decision TEXT NOT NULL CHECK (decision IN ('pending', 'approved', 'rejected')),
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
       );
 
       CREATE TABLE leases (
@@ -93,11 +93,11 @@ const migrations: readonly Migration[] = [
       );
 
       CREATE TABLE events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
         run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
         event_type TEXT NOT NULL,
         payload_json TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
       );
 
       CREATE TABLE qa_results (
@@ -106,7 +106,7 @@ const migrations: readonly Migration[] = [
         task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
         status TEXT NOT NULL CHECK (status IN ('verified', 'failed', 'not-run')),
         details TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
       );
 
       CREATE TABLE artifacts (
@@ -115,7 +115,7 @@ const migrations: readonly Migration[] = [
         kind TEXT NOT NULL,
         file_path TEXT NOT NULL,
         size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
       );
 
       CREATE TABLE usage_records (
@@ -127,7 +127,7 @@ const migrations: readonly Migration[] = [
         input_tokens INTEGER NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
         output_tokens INTEGER NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
         estimated_cost_microunits INTEGER CHECK (estimated_cost_microunits IS NULL OR estimated_cost_microunits >= 0),
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
       );
 
       CREATE INDEX conversations_project_created_idx ON conversations(project_id, created_at);
@@ -164,7 +164,7 @@ const migrations: readonly Migration[] = [
         setup_commands_json TEXT NOT NULL,
         verification_commands_json TEXT NOT NULL,
         state TEXT NOT NULL CHECK (state IN ('ready', 'blocked', 'closed')),
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
       );
 
       CREATE TABLE checkpoints (
@@ -174,7 +174,7 @@ const migrations: readonly Migration[] = [
         baseline_commit TEXT,
         snapshot_path TEXT NOT NULL,
         changed_files_json TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
       );
 
       CREATE INDEX checkpoints_run_created_idx ON checkpoints(run_id, created_at);
@@ -189,7 +189,7 @@ const migrations: readonly Migration[] = [
         max_requests INTEGER NOT NULL CHECK (max_requests > 0),
         max_tool_calls INTEGER NOT NULL CHECK (max_tool_calls >= 0),
         max_output_tokens INTEGER NOT NULL CHECK (max_output_tokens > 0),
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
       );
     `,
   },
@@ -215,7 +215,7 @@ const migrations: readonly Migration[] = [
         allowed_tools_json TEXT NOT NULL,
         approval_id TEXT NOT NULL REFERENCES approvals(id),
         approval_fingerprint TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
       );
     `,
   },
@@ -229,7 +229,7 @@ const migrations: readonly Migration[] = [
         round_number INTEGER NOT NULL CHECK (round_number > 0),
         status TEXT NOT NULL CHECK (status IN ('passed', 'failed')),
         details TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')),
         UNIQUE (run_id, round_number)
       );
       CREATE INDEX qa_rounds_run_number_idx ON qa_rounds(run_id, round_number);
@@ -251,8 +251,7 @@ const migrations: readonly Migration[] = [
         provider_id TEXT PRIMARY KEY REFERENCES providers(id) ON DELETE CASCADE,
         binding_id TEXT NOT NULL UNIQUE
           CHECK (length(binding_id) BETWEEN 1 AND 64)
-          CHECK (binding_id NOT GLOB '*[^a-z0-9_-]*')
-          CHECK (substr(binding_id, 1, 1) GLOB '[a-z0-9]'),
+          CHECK (binding_id ~ '^[a-z0-9][a-z0-9_-]{0,63}$'),
         state TEXT NOT NULL CHECK (state IN (
           'not_installed', 'needs_login', 'connected', 'ready',
           'rate_limited', 'unavailable', 'unsupported'
@@ -279,36 +278,93 @@ const migrations: readonly Migration[] = [
       ADD COLUMN generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0);
     `,
   },
+  {
+    version: 11,
+    name: "postgres_constraints_and_server_only_access",
+    sql: `
+      ALTER TABLE tasks ADD CONSTRAINT task_state_valid
+        CHECK (state IN ('queued', 'running', 'done', 'failed', 'blocked', 'cancelled'));
+      CREATE UNIQUE INDEX one_running_task_per_run ON tasks(run_id) WHERE state = 'running';
+      ALTER TABLE providers ADD CONSTRAINT subscription_secret_free
+        CHECK (auth_mode <> 'subscription_cli' OR
+          (kind IS NOT NULL AND kind <> 'deepseek' AND secret_reference IS NULL));
+      ALTER TABLE providers ADD CONSTRAINT capabilities_array
+        CHECK (jsonb_typeof(capabilities_json::jsonb) = 'array');
+      ALTER TABLE approvals ADD CONSTRAINT scope_object CHECK (jsonb_typeof(scope_json::jsonb) = 'object');
+      ALTER TABLE events ADD CONSTRAINT payload_valid CHECK (payload_json::jsonb IS NOT NULL);
+      ALTER TABLE checkpoints ADD CONSTRAINT changed_files_array CHECK (jsonb_typeof(changed_files_json::jsonb) = 'array');
+      ALTER TABLE run_plans
+        ADD CONSTRAINT criteria_array CHECK (jsonb_typeof(acceptance_criteria_json::jsonb) = 'array'),
+        ADD CONSTRAINT setup_array CHECK (jsonb_typeof(setup_commands_json::jsonb) = 'array'),
+        ADD CONSTRAINT verification_array CHECK (jsonb_typeof(verification_commands_json::jsonb) = 'array'),
+        ADD CONSTRAINT tools_array CHECK (jsonb_typeof(allowed_tools_json::jsonb) = 'array');
+      ALTER TABLE run_workspaces
+        ADD CONSTRAINT setup_array CHECK (jsonb_typeof(setup_commands_json::jsonb) = 'array'),
+        ADD CONSTRAINT verification_array CHECK (jsonb_typeof(verification_commands_json::jsonb) = 'array');
+      ALTER TABLE artifacts ALTER COLUMN size_bytes TYPE BIGINT;
+      ALTER TABLE usage_records ALTER COLUMN estimated_cost_microunits TYPE BIGINT;
+      ALTER TABLE events ALTER COLUMN id TYPE BIGINT;
+      ALTER TABLE runs ALTER COLUMN updated_at DROP DEFAULT;
+      ALTER TABLE runs ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at::timestamptz;
+      ALTER TABLE runs ALTER COLUMN updated_at SET DEFAULT CURRENT_TIMESTAMP;
+      ALTER TABLE leases ALTER COLUMN expires_at TYPE TIMESTAMPTZ USING expires_at::timestamptz;
+      ALTER TABLE schema_migrations ALTER COLUMN applied_at DROP DEFAULT;
+      ALTER TABLE schema_migrations ALTER COLUMN applied_at TYPE TIMESTAMPTZ USING applied_at::timestamptz;
+      ALTER TABLE schema_migrations ALTER COLUMN applied_at SET DEFAULT CURRENT_TIMESTAMP;
+
+      DO $$
+      DECLARE nail_table TEXT; role_name TEXT;
+      BEGIN
+        FOREACH nail_table IN ARRAY ARRAY[
+          'projects', 'providers', 'agents', 'runs', 'conversations', 'tasks',
+          'task_dependencies', 'approvals', 'leases', 'events', 'qa_results',
+          'artifacts', 'usage_records', 'run_workspaces', 'checkpoints',
+          'run_usage_budgets', 'run_plans', 'qa_rounds', 'provider_account_bindings',
+          'schema_migrations'
+        ] LOOP
+          IF EXISTS (SELECT 1 FROM information_schema.columns c
+            WHERE c.table_schema = current_schema() AND c.table_name = nail_table AND c.column_name = 'created_at') THEN
+            EXECUTE format('ALTER TABLE %I ALTER COLUMN created_at DROP DEFAULT', nail_table);
+            EXECUTE format('ALTER TABLE %I ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at::timestamptz', nail_table);
+            EXECUTE format('ALTER TABLE %I ALTER COLUMN created_at SET DEFAULT CURRENT_TIMESTAMP', nail_table);
+          END IF;
+          -- Supabase's default grants must not expose owner data via PostgREST.
+          EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', nail_table);
+          EXECUTE format('REVOKE ALL ON TABLE %I FROM PUBLIC', nail_table);
+          FOREACH role_name IN ARRAY ARRAY['anon', 'authenticated', 'service_role'] LOOP
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN
+              EXECUTE format('REVOKE ALL ON TABLE %I FROM %I', nail_table, role_name);
+            END IF;
+          END LOOP;
+        END LOOP;
+      END $$;
+    `,
+  },
 ];
 
-export function migrateDatabase(database: DatabaseSync): void {
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      version INTEGER PRIMARY KEY,
-      name TEXT NOT NULL,
-      applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+export async function migrateDatabase(database: Database): Promise<void> {
+  await withTransaction(database, async () => {
+    await database.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    const appliedStatement = database.prepare(
+      "SELECT version FROM schema_migrations WHERE version = $1",
     );
-  `);
+    const insertStatement = database.prepare(
+      "INSERT INTO schema_migrations (version, name) VALUES ($1, $2)",
+    );
 
-  const appliedStatement = database.prepare(
-    "SELECT version FROM schema_migrations WHERE version = ?",
-  );
-  const insertStatement = database.prepare(
-    "INSERT INTO schema_migrations (version, name) VALUES (?, ?)",
-  );
-
-  for (const migration of migrations) {
-    database.exec("BEGIN IMMEDIATE");
-    try {
-      const alreadyApplied = appliedStatement.get(migration.version);
+    for (const migration of migrations) {
+      const alreadyApplied = await appliedStatement.get(migration.version);
       if (!alreadyApplied) {
-        database.exec(migration.sql);
-        insertStatement.run(migration.version, migration.name);
+        await database.exec(migration.sql);
+        await insertStatement.run(migration.version, migration.name);
       }
-      database.exec("COMMIT");
-    } catch (error) {
-      database.exec("ROLLBACK");
-      throw error;
     }
-  }
+  });
 }

@@ -10,10 +10,10 @@ const directories: string[] = [];
 const origin = "http://localhost:3000";
 const apiKey = "ds-handler-key-123456";
 
-function createContext(options: { authenticated?: boolean; databasePath?: string } = {}) {
+function createContext(options: { authenticated?: boolean; databaseUrl?: string } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "nail-provider-handler-"));
   directories.push(directory);
-  const databasePath = options.databasePath ?? join(directory, "app.sqlite");
+  const databaseUrl = options.databaseUrl ?? join(directory, "app-database");
   const handler = createProviderSetupHandler({
     auth: {
       protectedResource: async () => options.authenticated === false
@@ -21,11 +21,11 @@ function createContext(options: { authenticated?: boolean; databasePath?: string
         : Response.json({ authenticated: true }),
     },
     appOrigin: origin,
-    databasePath,
+    databaseUrl,
     createSecretStore: () => new EncryptedSecretStore(join(directory, "secrets"), Buffer.alloc(32, 5)),
     fetcher: async () => Response.json({ data: [{ id: "deepseek-chat" }] }),
   });
-  return { directory, databasePath, handler };
+  return { directory, databaseUrl, handler };
 }
 
 function post(body: unknown, requestOrigin = origin, contentType = "application/json") {
@@ -56,27 +56,27 @@ describe("provider setup handler", () => {
   });
 
   it("persists a valid provider but does not return the API key or secret reference", async () => {
-    const { handler, databasePath } = createContext();
+    const { handler, databaseUrl } = createContext();
     const response = await handler(post({ apiKey, model: "deepseek-chat" }));
     const payload = await response.json() as Record<string, unknown>;
-    const database = openDatabase(databasePath);
+    const database = (await openDatabase(databaseUrl));
     try {
       expect(response.status).toBe(201);
       expect(response.headers.get("cache-control")).toBe("no-store");
       expect(payload).toMatchObject({ name: "DeepSeek", model: "deepseek-chat", status: "ready" });
       expect(JSON.stringify(payload)).not.toContain(apiKey);
       expect(payload).not.toHaveProperty("secretReference");
-      expect(createRepositories(database).providers.list()).toHaveLength(1);
+      expect((await createRepositories(database).providers.list())).toHaveLength(1);
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
   it("rejects malformed JSON without creating the database", async () => {
-    const { handler, databasePath } = createContext();
+    const { handler, databaseUrl } = createContext();
     const response = await handler(post("{not-json"));
     expect(response.status).toBe(400);
-    expect(existsSync(databasePath)).toBe(false);
+    expect(existsSync(databaseUrl)).toBe(false);
   });
 
   it("returns configuration errors without exposing internals", async () => {
@@ -85,7 +85,7 @@ describe("provider setup handler", () => {
     const handler = createProviderSetupHandler({
       auth: { protectedResource: async () => Response.json({ authenticated: true }) },
       appOrigin: origin,
-      databasePath: undefined,
+      databaseUrl: undefined,
       createSecretStore: () => { throw new Error(`bad key ${apiKey}`); },
       fetcher: async () => Response.json({ data: [{ id: "deepseek-chat" }] }),
     });

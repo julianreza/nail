@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "../db/database";
 import { canTransitionRunState, type RunState } from "../../domain/run-state";
 import { createRepositories, type ApprovalRecord } from "../db/repositories";
 import { withTransaction } from "../db/database";
@@ -132,19 +132,19 @@ function scopeFromStoredJson(
 }
 
 export function createApprovalService(
-  database: DatabaseSync,
+  database: Database,
   options: { allowedPermissions: readonly string[] },
 ) {
   const repositories = createRepositories(database);
   const allowedPermissions = new Set(options.allowedPermissions);
 
-  function readCurrentRun(runId: string) {
-    const run = repositories.runs.getById(runId);
+  async function readCurrentRun(runId: string) {
+    const run = (await repositories.runs.getById(runId));
     if (!run) throw new Error("Run does not exist");
     return run;
   }
 
-  function assertScopeMatchesRun(scope: ApprovalScope, run: ReturnType<typeof readCurrentRun>) {
+  function assertScopeMatchesRun(scope: ApprovalScope, run: Awaited<ReturnType<typeof readCurrentRun>>) {
     if (scope.planVersion !== run.planVersion) {
       throw new Error("Plan version changed; request a new approval");
     }
@@ -153,16 +153,16 @@ export function createApprovalService(
     }
   }
 
-  function submitForApproval(
+  async function submitForApproval(
     runId: string,
     input: ApprovalScope,
-    onSubmitted?: (approval: ApprovalRecord) => void,
+    onSubmitted?: (approval: ApprovalRecord) => void | Promise<void>,
   ) {
     const scope = normalizeScope(input, allowedPermissions);
     const scopeJson = serializeScope(scope);
     const fingerprint = fingerprintScope(scopeJson);
-    const approvalId = withTransaction(database, () => {
-      const run = readCurrentRun(runId);
+    const approvalId = (await withTransaction(database, async () => {
+      const run = (await readCurrentRun(runId));
       assertScopeMatchesRun(scope, run);
       if (run.state !== "draft" && run.state !== "awaiting_approval") {
         throw new Error("Run is not available for approval");
@@ -174,7 +174,7 @@ export function createApprovalService(
         throw new Error("Run cannot request approval from its current state");
       }
 
-      const existing = repositories.approvals.listForRun(runId);
+      const existing = (await repositories.approvals.listForRun(runId));
       const samePending = existing.find(
         (approval) =>
           approval.decision === "pending" &&
@@ -182,7 +182,7 @@ export function createApprovalService(
           approval.payloadFingerprint === fingerprint,
       );
       if (samePending) {
-        onSubmitted?.(samePending);
+        await onSubmitted?.(samePending);
         return samePending.id;
       }
 
@@ -197,7 +197,7 @@ export function createApprovalService(
       }
 
       const id = randomUUID();
-      const createdApproval = repositories.approvals.create({
+      const createdApproval = (await repositories.approvals.create({
         id,
         runId,
         payloadFingerprint: fingerprint,
@@ -205,19 +205,19 @@ export function createApprovalService(
         planVersion: scope.planVersion,
         baselineCommit: scope.baselineCommit,
         scopeJson,
-      });
+      }));
 
       if (run.state === "draft") {
-        const result = database
+        const result = (await database
           .prepare(
-            `UPDATE runs SET state = 'awaiting_approval', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-             WHERE id = ? AND state = 'draft' AND plan_version = ? AND baseline_commit IS ?`,
+            `UPDATE runs SET state = 'awaiting_approval', updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1 AND state = 'draft' AND plan_version = $2 AND baseline_commit IS NOT DISTINCT FROM $3`,
           )
-          .run(runId, scope.planVersion, scope.baselineCommit);
+          .run(runId, scope.planVersion, scope.baselineCommit));
         if (result.changes !== 1) throw new Error("Run changed while requesting approval");
       }
 
-      repositories.events.append({
+      (await repositories.events.append({
         runId,
         eventType: "approval.requested",
         payload: {
@@ -226,23 +226,23 @@ export function createApprovalService(
           planVersion: scope.planVersion,
           baselineCommit: scope.baselineCommit,
         },
-      });
-      onSubmitted?.(createdApproval);
+      }));
+      await onSubmitted?.(createdApproval);
       return id;
-    });
+    }));
 
-    return repositories.approvals.getById(approvalId)!;
+    return (await repositories.approvals.getById(approvalId))!;
   }
 
-  function decide(
+  async function decide(
     approvalId: string,
     input: {
       decision: "approved" | "rejected";
       expectedFingerprint: string;
     },
   ) {
-    return withTransaction(database, () => {
-      const approval = repositories.approvals.getById(approvalId);
+    return (await withTransaction(database, async () => {
+      const approval = (await repositories.approvals.getById(approvalId));
       if (!approval || approval.decision !== "pending") {
         throw new Error("Approval is not pending");
       }
@@ -256,7 +256,7 @@ export function createApprovalService(
         throw new Error("Stored approval fingerprint is invalid");
       }
 
-      const run = readCurrentRun(approval.runId);
+      const run = (await readCurrentRun(approval.runId));
       assertScopeMatchesRun(scope, run);
       if (run.state !== "awaiting_approval") {
         throw new Error("Run is no longer awaiting approval");
@@ -266,18 +266,18 @@ export function createApprovalService(
       if (!canTransitionRunState(run.state, nextState)) {
         throw new Error("Run cannot make this approval transition");
       }
-      if (!repositories.approvals.updateDecision(approvalId, input.decision)) {
+      if (!(await repositories.approvals.updateDecision(approvalId, input.decision))) {
         throw new Error("Approval was already decided");
       }
-      const transition = database
+      const transition = (await database
         .prepare(
-          `UPDATE runs SET state = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-           WHERE id = ? AND state = 'awaiting_approval' AND plan_version = ? AND baseline_commit IS ?`,
+          `UPDATE runs SET state = $1, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $2 AND state = 'awaiting_approval' AND plan_version = $3 AND baseline_commit IS NOT DISTINCT FROM $4`,
         )
-        .run(nextState, run.id, scope.planVersion, scope.baselineCommit);
+        .run(nextState, run.id, scope.planVersion, scope.baselineCommit));
       if (transition.changes !== 1) throw new Error("Run changed while deciding approval");
 
-      repositories.events.append({
+      (await repositories.events.append({
         runId: run.id,
         eventType: "approval.decided",
         payload: {
@@ -287,15 +287,15 @@ export function createApprovalService(
           planVersion: approval.planVersion,
           nextState,
         },
-      });
-      return repositories.approvals.getById(approvalId)!;
-    });
+      }));
+      return (await repositories.approvals.getById(approvalId))!;
+    }));
   }
 
-  function isExecutionApproved(runId: string, input: ApprovalScope): boolean {
+  async function isExecutionApproved(runId: string, input: ApprovalScope): Promise<boolean> {
     try {
       const scope = normalizeScope(input, allowedPermissions);
-      const run = readCurrentRun(runId);
+      const run = (await readCurrentRun(runId));
       if (
         !["queued", "running", "awaiting_review"].includes(run.state) ||
         scope.planVersion !== run.planVersion ||
@@ -305,7 +305,7 @@ export function createApprovalService(
       }
       const expectedScope = serializeScope(scope);
       const expectedFingerprint = fingerprintScope(expectedScope);
-      return repositories.approvals.listForRun(runId).some((approval) => {
+      return (await repositories.approvals.listForRun(runId)).some((approval) => {
         if (
           approval.decision !== "approved" ||
           approval.planVersion !== run.planVersion ||
@@ -322,7 +322,7 @@ export function createApprovalService(
     }
   }
 
-  function transitionRun(
+  async function transitionRun(
     runId: string,
     nextState: RunState,
     actor: RunTransitionActor,
@@ -330,8 +330,8 @@ export function createApprovalService(
     if (!["owner", "worker", "system"].includes(actor)) {
       throw new Error("Model output cannot change run state");
     }
-    return withTransaction(database, () => {
-      const run = readCurrentRun(runId);
+    return (await withTransaction(database, async () => {
+      const run = (await readCurrentRun(runId));
       if (!canTransitionRunState(run.state, nextState)) {
         throw new Error("Run state transition is not allowed");
       }
@@ -341,29 +341,29 @@ export function createApprovalService(
       if (nextState === "done") {
         throw new Error("Completion requires verified acceptance criteria");
       }
-      if (nextState === "running" && !isExecutionApprovedForStoredScope(runId)) {
+      if (nextState === "running" && !(await isExecutionApprovedForStoredScope(runId))) {
         throw new Error("An approved payload is required before execution");
       }
 
-      const result = database
+      const result = (await database
         .prepare(
-          "UPDATE runs SET state = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND state = ?",
+          "UPDATE runs SET state = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND state = $3",
         )
-        .run(nextState, runId, run.state);
+        .run(nextState, runId, run.state));
       if (result.changes !== 1) throw new Error("Run changed during state transition");
-      repositories.events.append({
+      (await repositories.events.append({
         runId,
         eventType: "run.state_changed",
         payload: { from: run.state, to: nextState, actor },
-      });
-      return repositories.runs.getById(runId)!;
-    });
+      }));
+      return (await repositories.runs.getById(runId))!;
+    }));
   }
 
-  function isExecutionApprovedForStoredScope(runId: string): boolean {
-    const run = repositories.runs.getById(runId);
+  async function isExecutionApprovedForStoredScope(runId: string): Promise<boolean> {
+    const run = (await repositories.runs.getById(runId));
     if (!run) return false;
-    return repositories.approvals.listForRun(runId).some((approval) => {
+    return (await repositories.approvals.listForRun(runId)).some((approval) => {
       if (
         approval.decision !== "approved" ||
         approval.planVersion !== run.planVersion ||

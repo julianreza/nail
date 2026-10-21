@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "../db/database";
 import type { DeepSeekRequest, DeepSeekResult } from "../providers/deepseek-adapter";
 import { getRemainingUsageBudget } from "../providers/usage-budget";
 import { createRepositories } from "../db/repositories";
@@ -16,7 +16,7 @@ interface TaskProvider {
 type TaskSandbox = Pick<RootlessDockerSandbox, "start" | "execute" | "stop">;
 
 export interface SandboxTaskExecutorOptions {
-  database: DatabaseSync;
+  database: Database;
   workerId: string;
   allowedPermissions: readonly string[];
   image: string;
@@ -35,30 +35,30 @@ export function createSandboxTaskExecutor(options: SandboxTaskExecutorOptions): 
   }
   return async (runId, signal) => {
     const repos = createRepositories(options.database);
-    const plan = repos.runPlans.getByRunId(runId);
-    const workspace = repos.workspaces.getByRunId(runId);
-    const run = repos.runs.getById(runId);
+    const plan = (await repos.runPlans.getByRunId(runId));
+    const workspace = (await repos.workspaces.getByRunId(runId));
+    const run = (await repos.runs.getById(runId));
     if (!plan || !workspace || workspace.state !== "ready" || !run || run.state !== "running") {
       return { state: "blocked" };
     }
-    const approval = repos.approvals.getById(plan.approvalId);
+    const approval = (await repos.approvals.getById(plan.approvalId));
     if (!approval || approval.payloadFingerprint !== plan.approvalFingerprint) return { state: "blocked" };
     const scope = JSON.parse(approval.scopeJson) as ApprovalScope;
     const auth = createApprovalService(options.database, { allowedPermissions: options.allowedPermissions });
-    if (!auth.isExecutionApproved(runId, scope) || workspace.baselineCommit !== run.baselineCommit) {
+    if (!(await auth.isExecutionApproved(runId, scope)) || workspace.baselineCommit !== run.baselineCommit) {
       return { state: "blocked" };
     }
-    const lease = repos.leases.get();
+    const lease = (await repos.leases.get());
     if (!lease || lease.runId !== runId || lease.workerId !== options.workerId || Date.parse(lease.expiresAt) <= Date.now()) {
       return { state: "blocked" };
     }
-    if (repos.tasks.listForRun(runId).length === 0) return { state: "blocked" };
+    if ((await repos.tasks.listForRun(runId)).length === 0) return { state: "blocked" };
     while (!signal.aborted) {
-      const task = selectNextReadyTask(options.database, runId);
+      const task = (await selectNextReadyTask(options.database, runId));
       if (!task) {
-        return { state: repos.tasks.listForRun(runId).every((item) => item.state === "done") ? "awaiting_review" : "blocked" };
+        return { state: (await repos.tasks.listForRun(runId)).every((item) => item.state === "done") ? "awaiting_review" : "blocked" };
       }
-      const agent = task.ownerAgentId ? repos.agents.getById(task.ownerAgentId) : null;
+      const agent = task.ownerAgentId ? (await repos.agents.getById(task.ownerAgentId)) : null;
       if (!agent?.providerId) return { state: "blocked" };
       // Sandbox start is fail-closed and happens before any model request.
       const handle = await options.sandbox.start({
@@ -69,7 +69,7 @@ export function createSandboxTaskExecutor(options: SandboxTaskExecutorOptions): 
         approvedCommands: [...scope.setupCommands, ...scope.verificationCommands],
       });
       try {
-        setTaskState(options.database, task.id, "running", "worker");
+        (await setTaskState(options.database, task.id, "running", "worker"));
         const result = await runTaskToolLoop({
           database: options.database,
           runId,
@@ -81,7 +81,7 @@ export function createSandboxTaskExecutor(options: SandboxTaskExecutorOptions): 
           maxToolCalls: options.maxToolCallsPerTask,
           signal,
           model: async (messages) => {
-            const remaining = getRemainingUsageBudget(options.database, runId);
+            const remaining = (await getRemainingUsageBudget(options.database, runId));
             if (remaining.requests < 1 || remaining.outputTokens < 1 || remaining.toolCalls < 1) {
               throw new Error("Run usage budget exhausted");
             }
@@ -100,11 +100,11 @@ export function createSandboxTaskExecutor(options: SandboxTaskExecutorOptions): 
           executeInSandbox: (command) => options.sandbox.execute(handle, command, signal),
         });
         if (result.reason !== "model_finished" || result.failedCommands > 0) {
-          setTaskState(options.database, task.id, "blocked", "worker");
+          (await setTaskState(options.database, task.id, "blocked", "worker"));
           return { state: "blocked" };
         }
-        createCheckpoint(options.database, { runId, taskId: task.id });
-        setTaskState(options.database, task.id, "done", "worker");
+        (await createCheckpoint(options.database, { runId, taskId: task.id }));
+        (await setTaskState(options.database, task.id, "done", "worker"));
       } finally {
         // Do not release the worker lease until container teardown completes.
         await options.sandbox.stop(handle);

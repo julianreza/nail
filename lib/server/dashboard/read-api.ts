@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "../db/database";
 import { openDatabase } from "../db/database";
 import { createRepositories } from "../db/repositories";
 
@@ -13,71 +13,71 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-function count(database: DatabaseSync, query: string): number {
-  const result = database.prepare(query).get() as { total: number };
+async function count(database: Database, query: string): Promise<number> {
+  const result = (await database.prepare(query).get()) as { total: number };
   return result.total;
 }
 
 export function createDashboardReadHandlers(
   auth: AuthGuard,
-  databasePath: string | undefined,
+  databaseUrl: string | undefined,
 ) {
   async function read<T>(
     request: Request,
-    query: (database: DatabaseSync, repositories: ReturnType<typeof createRepositories>) => T,
+    query: (database: Database, repositories: ReturnType<typeof createRepositories>) => T | Promise<T>,
   ): Promise<Response> {
     const authorization = await auth.protectedResource(request);
     if (!authorization.ok) return authorization;
-    if (!databasePath) {
+    if (!databaseUrl) {
       return json({ error: "Database is not configured" }, 503);
     }
 
-    let database: DatabaseSync | undefined;
+    let database: Database | undefined;
     try {
-      database = openDatabase(databasePath);
-      return json(query(database, createRepositories(database)));
+      database = (await openDatabase(databaseUrl));
+      return json(await query(database, createRepositories(database)));
     } catch {
       return json({ error: "Unable to read application data" }, 500);
     } finally {
-      database?.close();
+      (await database?.close());
     }
   }
 
   return {
     overview(request: Request): Promise<Response> {
-      return read(request, (database) => ({
-        projectsCount: count(database, "SELECT COUNT(*) AS total FROM projects"),
-        agentsCount: count(database, "SELECT COUNT(*) AS total FROM agents"),
-        activeRunsCount: count(
+      return read(request, async (database) => ({
+        projectsCount: (await count(database, "SELECT COUNT(*) AS total FROM projects")),
+        agentsCount: (await count(database, "SELECT COUNT(*) AS total FROM agents")),
+        activeRunsCount: (await count(
           database,
           "SELECT COUNT(*) AS total FROM runs WHERE state IN ('running', 'awaiting_review')",
-        ),
-        queuedRunsCount: count(
+        )),
+        queuedRunsCount: (await count(
           database,
           "SELECT COUNT(*) AS total FROM runs WHERE state = 'queued'",
-        ),
-        pendingApprovalsCount: count(
+        )),
+        pendingApprovalsCount: (await count(
           database,
           "SELECT COUNT(*) AS total FROM approvals WHERE decision = 'pending'",
-        ),
+        )),
       }));
     },
     projects(request: Request): Promise<Response> {
-      return read(request, (_database, repositories) => repositories.projects.list());
+      return read(request, async (_database, repositories) => (await repositories.projects.list()));
     },
     agents(request: Request): Promise<Response> {
-      return read(request, (_database, repositories) => repositories.agents.list());
+      return read(request, async (_database, repositories) => (await repositories.agents.list()));
     },
     tasks(request: Request): Promise<Response> {
-      return read(request, (_database, repositories) => repositories.tasks.list());
+      return read(request, async (_database, repositories) => (await repositories.tasks.list()));
     },
     approvals(request: Request): Promise<Response> {
-      return read(request, (_database, repositories) => repositories.approvals.list());
+      return read(request, async (_database, repositories) => (await repositories.approvals.list()));
     },
     providers(request: Request): Promise<Response> {
-      return read(request, (_database, repositories) =>
-        repositories.providers.list().map((provider) => {
-          const binding = repositories.accountBindings.getByProviderId(provider.id);
+      return read(request, async (_database, repositories) =>
+        Promise.all((await repositories.providers.list()).map(async (provider) => {
+          const binding = (await repositories.accountBindings.getByProviderId(provider.id));
           return {
             id: provider.id,
             name: provider.name,
@@ -91,7 +91,7 @@ export function createDashboardReadHandlers(
               ? { state: binding.state, reason: binding.reason, checkedAt: binding.checkedAt }
               : null,
           };
-        }),
+        })),
       );
     },
   };

@@ -10,15 +10,15 @@ const tempDirs: string[] = [];
 const allowedPermissions = ["workspace:read", "workspace:write", "terminal:execute"];
 const allowedTools = ["workspace:read", "workspace:write", "terminal:execute"];
 
-function createDatabase() {
+async function createDatabase() {
   const directory = mkdtempSync(join(tmpdir(), "nail-run-request-test-"));
   tempDirs.push(directory);
-  const database = openDatabase(join(directory, "db.sqlite"));
+  const database = (await openDatabase(join(directory, "db-database")));
   const repos = createRepositories(database);
-  repos.projects.create({ id: "project-1", name: "Nail" });
-  repos.agents.create({ id: "agent-fe", projectId: "project-1", name: "FE", role: "frontend" });
-  repos.agents.create({ id: "agent-be", projectId: "project-1", name: "BE", role: "backend" });
-  repos.providers.create({
+  (await repos.projects.create({ id: "project-1", name: "Nail" }));
+  (await repos.agents.create({ id: "agent-fe", projectId: "project-1", name: "FE", role: "frontend" }));
+  (await repos.agents.create({ id: "agent-be", projectId: "project-1", name: "BE", role: "backend" }));
+  (await repos.providers.create({
     id: "deepseek-1",
     name: "DeepSeek",
     kind: "deepseek",
@@ -27,7 +27,7 @@ function createDatabase() {
     authMode: "api_key",
     secretReference: "secret:already-encrypted-reference",
     capabilities: [],
-  });
+  }));
   return { database, repos };
 }
 
@@ -74,28 +74,28 @@ afterEach(() => {
 
 describe("requesting an approved PM plan", () => {
   it("creates a bounded draft request and stores only a server-validated plan", async () => {
-    const { database, repos } = createDatabase();
+    const { database, repos } = (await createDatabase());
     let generatedWith: unknown;
     try {
       const result = await createRunPlanFromGoal(database, request, policy, async (input: PlanGeneratorInput) => {
         generatedWith = input;
-        const reservation = reserveProviderRequest(database, {
+        const reservation = (await reserveProviderRequest(database, {
           runId: input.runId,
           providerId: input.providerId,
           maxOutputTokens: input.maxOutputTokens,
-        });
-        completeProviderUsage(database, reservation.id, {
+        }));
+        (await completeProviderUsage(database, reservation.id, {
           inputTokens: 20,
           outputTokens: 10,
           toolCalls: 0,
-        });
+        }));
         return generatedPlan;
       });
       expect(result.plan.goal).toBe("Add a project summary");
       expect(result.approval.decision).toBe("pending");
-      expect(repos.runs.getById(result.runId)?.state).toBe("awaiting_approval");
-      expect(repos.runPlans.getByRunId(result.runId)?.setupCommandsJson).toBe('["bun install"]');
-      expect(getRemainingUsageBudget(database, result.runId)).toMatchObject({
+      expect((await repos.runs.getById(result.runId))?.state).toBe("awaiting_approval");
+      expect((await repos.runPlans.getByRunId(result.runId))?.setupCommandsJson).toBe('["bun install"]');
+      expect((await getRemainingUsageBudget(database, result.runId))).toMatchObject({
         requests: 4,
         toolCalls: 10,
         outputTokens: 3990,
@@ -106,21 +106,21 @@ describe("requesting an approved PM plan", () => {
         maxOutputTokens: 4000,
       });
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
   it("accepts a ready subscription provider without requiring or reading an API-key secret", async () => {
-    const { database, repos } = createDatabase();
-    const subscription = repos.providers.create({
+    const { database, repos } = (await createDatabase());
+    const subscription = (await repos.providers.create({
       id: "codex-1",
       name: "Renamed account label",
       kind: "codex",
       status: "ready",
       model: "gpt-codex-model",
       authMode: "subscription_cli",
-    });
-    repos.accountBindings.create({ providerId: subscription.id, bindingId: "codex-owner", state: "ready" });
+    }));
+    (await repos.accountBindings.create({ providerId: subscription.id, bindingId: "codex-owner", state: "ready" }));
     try {
       const result = await createRunPlanFromGoal(
         database,
@@ -128,39 +128,39 @@ describe("requesting an approved PM plan", () => {
         policy,
         async () => generatedPlan,
       );
-      expect(repos.runs.getById(result.runId)?.state).toBe("awaiting_approval");
-      expect(repos.usageRecords.list().every((usage) => usage.providerId === subscription.id)).toBe(true);
-      expect(repos.providers.getById(subscription.id)?.secretReference).toBeNull();
+      expect((await repos.runs.getById(result.runId))?.state).toBe("awaiting_approval");
+      expect((await repos.usageRecords.list()).every((usage) => usage.providerId === subscription.id)).toBe(true);
+      expect((await repos.providers.getById(subscription.id))?.secretReference).toBeNull();
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
   it("fails the draft safely when the planner fails and does not fall back", async () => {
-    const { database, repos } = createDatabase();
+    const { database, repos } = (await createDatabase());
     let calls = 0;
     try {
       await expect(
         createRunPlanFromGoal(database, request, policy, async (input: PlanGeneratorInput) => {
           calls += 1;
-          reserveProviderRequest(database, {
+          (await reserveProviderRequest(database, {
             runId: input.runId,
             providerId: input.providerId,
             maxOutputTokens: input.maxOutputTokens,
-          });
+          }));
           throw new Error("provider unavailable");
         }),
       ).rejects.toThrow();
       expect(calls).toBe(1);
-      expect(repos.runs.list().map((run) => run.state)).toEqual(["failed"]);
-      expect(repos.approvals.list()).toEqual([]);
+      expect((await repos.runs.list()).map((run) => run.state)).toEqual(["failed"]);
+      expect((await repos.approvals.list())).toEqual([]);
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
   it("refuses credential-like goal text before asking a provider", async () => {
-    const { database, repos } = createDatabase();
+    const { database, repos } = (await createDatabase());
     let calls = 0;
     try {
       await expect(
@@ -175,9 +175,9 @@ describe("requesting an approved PM plan", () => {
         ),
       ).rejects.toThrow();
       expect(calls).toBe(0);
-      expect(repos.runs.list()).toEqual([]);
+      expect((await repos.runs.list())).toEqual([]);
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 });

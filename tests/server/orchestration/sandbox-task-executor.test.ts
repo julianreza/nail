@@ -9,33 +9,33 @@ import { configureRunUsageBudget } from "../../../lib/server/providers/usage-bud
 import { runWorkerOnce } from "../../../worker/runner";
 import { createSandboxTaskExecutor } from "../../../lib/server/orchestration/sandbox-task-executor";
 
-function fixture() {
+async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "nail-executor-"));
   const working = join(root, "working");
   const baseline = join(root, "baseline");
   mkdirSync(working); mkdirSync(baseline);
-  const db = openDatabase(join(root, "db.sqlite"));
+  const db = (await openDatabase(join(root, "db-database")));
   const repos = createRepositories(db);
-  repos.projects.create({ id: "p", name: "Project" });
-  repos.providers.create({ id: "provider", name: "DeepSeek", status: "ready", authMode: "api_key" });
-  repos.agents.create({ id: "a", projectId: "p", providerId: "provider", name: "Engineer", role: "engineer" });
-  repos.runs.create({ id: "r", projectId: "p", state: "draft" });
+  (await repos.projects.create({ id: "p", name: "Project" }));
+  (await repos.providers.create({ id: "provider", name: "DeepSeek", status: "ready", authMode: "api_key" }));
+  (await repos.agents.create({ id: "a", projectId: "p", providerId: "provider", name: "Engineer", role: "engineer" }));
+  (await repos.runs.create({ id: "r", projectId: "p", state: "draft" }));
   const permissions = ["terminal:execute"];
-  const submitted = proposePlanForApproval(db, "r", {
+  const submitted = (await proposePlanForApproval(db, "r", {
     goal: "Read UID", acceptanceCriteria: [{ id: "uid", description: "Non-root" }],
     subtasks: [{ id: "uid", title: "Read UID", description: "Read UID", ownerAgentId: "a", requiredTools: permissions, dependsOn: [] }],
-  }, { allowedTools: permissions, allowedPermissions: permissions, setupCommands: [], verificationCommands: ["id -u"], costLimitMicrounits: 100 });
-  createApprovalService(db, { allowedPermissions: permissions }).decide(submitted.approval.id, {
+  }, { allowedTools: permissions, allowedPermissions: permissions, setupCommands: [], verificationCommands: ["id -u"], costLimitMicrounits: 100 }));
+  (await createApprovalService(db, { allowedPermissions: permissions }).decide(submitted.approval.id, {
     decision: "approved", expectedFingerprint: submitted.approval.payloadFingerprint,
-  });
-  repos.workspaces.create({ id: "w", runId: "r", projectId: "p", sourcePath: null, workspacePath: working, baselinePath: baseline, baselineCommit: null, setupCommands: [], verificationCommands: ["id -u"] });
-  configureRunUsageBudget(db, { runId: "r", maxRequests: 3, maxToolCalls: 2, maxOutputTokens: 1000 });
+  }));
+  (await repos.workspaces.create({ id: "w", runId: "r", projectId: "p", sourcePath: null, workspacePath: working, baselinePath: baseline, baselineCommit: null, setupCommands: [], verificationCommands: ["id -u"] }));
+  (await configureRunUsageBudget(db, { runId: "r", maxRequests: 3, maxToolCalls: 2, maxOutputTokens: 1000 }));
   return { db, repos, root, permissions };
 }
 
 describe("worker to provider and sandbox bridge", () => {
   it("passes the approved command through sandbox, checkpoints, and ends at review not done", async () => {
-    const { db, repos, root, permissions } = fixture();
+    const { db, repos, root, permissions } = (await fixture());
     let modelRequests = 0;
     let stopped = false;
     let commandCount = 0;
@@ -67,14 +67,14 @@ describe("worker to provider and sandbox bridge", () => {
       expect(result).toMatchObject({ state: "awaiting_review", finalized: true });
       expect(commandCount).toBe(1);
       expect(stopped).toBe(true);
-      expect(repos.checkpoints.listForRun("r")).toHaveLength(1);
-      expect(repos.leases.get()).toBeNull();
-      expect(repos.runs.getById("r")?.state).toBe("awaiting_review");
-    } finally { db.close(); rmSync(root, { recursive: true, force: true }); }
+      expect((await repos.checkpoints.listForRun("r"))).toHaveLength(1);
+      expect((await repos.leases.get())).toBeNull();
+      expect((await repos.runs.getById("r"))?.state).toBe("awaiting_review");
+    } finally { (await db.close()); rmSync(root, { recursive: true, force: true }); }
   });
 
   it("does not call the model when sandbox startup fails", async () => {
-    const { db, repos, root, permissions } = fixture();
+    const { db, repos, root, permissions } = (await fixture());
     let modelRequests = 0;
     try {
       const execute = createSandboxTaskExecutor({
@@ -90,12 +90,12 @@ describe("worker to provider and sandbox bridge", () => {
       const result = await runWorkerOnce({ database: db, workerId: "worker", execute });
       expect(result).toMatchObject({ state: "failed", finalized: true });
       expect(modelRequests).toBe(0);
-      expect(repos.tasks.listForRun("r")[0]?.state).toBe("queued");
-    } finally { db.close(); rmSync(root, { recursive: true, force: true }); }
+      expect((await repos.tasks.listForRun("r"))[0]?.state).toBe("queued");
+    } finally { (await db.close()); rmSync(root, { recursive: true, force: true }); }
   });
 
   it("blocks the task when an approved command fails even if the model claims completion", async () => {
-    const { db, repos, root, permissions } = fixture();
+    const { db, repos, root, permissions } = (await fixture());
     let modelRequests = 0;
     try {
       const execute = createSandboxTaskExecutor({
@@ -117,8 +117,8 @@ describe("worker to provider and sandbox bridge", () => {
       });
       const result = await runWorkerOnce({ database: db, workerId: "worker", execute });
       expect(result).toMatchObject({ state: "blocked", finalized: true });
-      expect(repos.tasks.listForRun("r")[0]?.state).toBe("blocked");
-      expect(repos.checkpoints.listForRun("r")).toHaveLength(0);
-    } finally { db.close(); rmSync(root, { recursive: true, force: true }); }
+      expect((await repos.tasks.listForRun("r"))[0]?.state).toBe("blocked");
+      expect((await repos.checkpoints.listForRun("r"))).toHaveLength(0);
+    } finally { (await db.close()); rmSync(root, { recursive: true, force: true }); }
   });
 });

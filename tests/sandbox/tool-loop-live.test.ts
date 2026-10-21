@@ -19,7 +19,7 @@ describe.skipIf(!live)("live rootless sandbox tool loop (explicit opt-in)", () =
     const baselinePath = join(root, "baseline");
     mkdirSync(workspacePath);
     mkdirSync(baselinePath);
-    const db = openDatabase(join(root, "db.sqlite"));
+    const db = (await openDatabase(join(root, "db-database")));
     const image = process.env.NAIL_SANDBOX_PROBE_IMAGE ?? "alpine:3.20";
     const sandbox = new RootlessDockerSandbox(new DockerCliDriver(), { probeImage: image });
     let handle: Awaited<ReturnType<typeof sandbox.start>> | undefined;
@@ -27,17 +27,17 @@ describe.skipIf(!live)("live rootless sandbox tool loop (explicit opt-in)", () =
       const preflight = await sandbox.preflight();
       expect(preflight).toEqual({ ready: true });
       const repos = createRepositories(db);
-      repos.projects.create({ id: "p", name: "Live fixture" });
-      repos.runs.create({ id: "r", projectId: "p", state: "draft" });
+      (await repos.projects.create({ id: "p", name: "Live fixture" }));
+      (await repos.runs.create({ id: "r", projectId: "p", state: "draft" }));
       const scope = {
         planVersion: 1, baselineCommit: null, setupCommands: [],
         verificationCommands: ["id -u"], permissions: ["terminal:execute"], costLimitMicrounits: 100,
       };
       const approvalService = createApprovalService(db, { allowedPermissions: scope.permissions });
-      const approval = approvalService.submitForApproval("r", scope);
-      approvalService.decide(approval.id, { decision: "approved", expectedFingerprint: approval.payloadFingerprint });
-      claimNextJob(db, { workerId: "live-worker", now: new Date().toISOString(), leaseDurationMs: 60_000 });
-      repos.tasks.create({ id: "t", runId: "r", title: "Read sandbox UID", state: "running" });
+      const approval = (await approvalService.submitForApproval("r", scope));
+      (await approvalService.decide(approval.id, { decision: "approved", expectedFingerprint: approval.payloadFingerprint }));
+      (await claimNextJob(db, { workerId: "live-worker", now: new Date().toISOString(), leaseDurationMs: 60_000 }));
+      (await repos.tasks.create({ id: "t", runId: "r", title: "Read sandbox UID", state: "running" }));
       handle = await sandbox.start({ runId: "r", image, workspacePath, baselinePath, approvedCommands: ["id -u"] });
       const activeHandle = handle;
       let calls = 0;
@@ -54,14 +54,14 @@ describe.skipIf(!live)("live rootless sandbox tool loop (explicit opt-in)", () =
         executeInSandbox: (command, signal) => sandbox.execute(activeHandle, command, signal),
       });
       expect(result.reason).toBe("model_finished");
-      expect(repos.runs.getById("r")?.state).toBe("running");
-      const completed = repos.events.listAfter("r", 0).find((event) => event.eventType === "tool.completed");
+      expect((await repos.runs.getById("r"))?.state).toBe("running");
+      const completed = (await repos.events.listAfter("r", 0)).find((event) => event.eventType === "tool.completed");
       expect(completed?.payload).toMatchObject({ command: "id -u", stdout: "10001\n", exitCode: 0 });
       await sandbox.stop(handle);
       expect(execFileSync("docker", ["ps", "-a", "--filter", `id=${handle.containerId}`, "--format", "{{.ID}}"], { encoding: "utf8" }).trim()).toBe("");
     } finally {
       if (handle) await sandbox.stop(handle);
-      db.close();
+      (await db.close());
       rmSync(root, { recursive: true, force: true });
     }
   }, 120_000);

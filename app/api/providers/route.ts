@@ -17,6 +17,6 @@ export async function POST(request: Request): Promise<Response> {
   return createProviderSetupHandler({
     auth,
     appOrigin: process.env.APP_ORIGIN,
-    databasePath: process.env.NAIL_DATABASE_PATH,
+    databaseUrl: process.env.DATABASE_URL,
   })(request);
 }

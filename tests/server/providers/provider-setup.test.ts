@@ -11,10 +11,10 @@ import {
 
 const directories: string[] = [];
 
-function setup() {
+async function setup() {
   const directory = mkdtempSync(join(tmpdir(), "nail-provider-setup-"));
   directories.push(directory);
-  const database = openDatabase(join(directory, "app.sqlite"));
+  const database = (await openDatabase(join(directory, "app-database")));
   const store = new EncryptedSecretStore(join(directory, "secrets"), Buffer.alloc(32, 7));
   return { directory, database, store };
 }
@@ -29,7 +29,7 @@ afterEach(() => {
 
 describe("DeepSeek provider setup", () => {
   it("validates a key and advertised model before saving only an encrypted secret reference", async () => {
-    const { directory, database, store } = setup();
+    const { directory, database, store } = (await setup());
     let requestedUrl = "";
     let authorization = "";
     const apiKey = "ds-test-provider-key-123";
@@ -44,7 +44,7 @@ describe("DeepSeek provider setup", () => {
           return modelsResponse();
         },
       );
-      const persisted = createRepositories(database).providers.getById(result.id);
+      const persisted = (await createRepositories(database).providers.getById(result.id));
       expect(requestedUrl).toBe("https://api.deepseek.com/models");
       expect(authorization).toBe(`Bearer ${apiKey}`);
       expect(result).toMatchObject({ name: "DeepSeek", model: "deepseek-chat", status: "ready" });
@@ -54,42 +54,42 @@ describe("DeepSeek provider setup", () => {
       expect(store.get(persisted!.secretReference!)).toBe(apiKey);
       expect(readdirSync(join(directory, "secrets"))).toHaveLength(1);
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
   it("rejects a model not advertised by DeepSeek without saving a secret", async () => {
-    const { database, store } = setup();
+    const { database, store } = (await setup());
     try {
       await expect(createDeepSeekProviderSetup(
         database, store, { apiKey: "valid-key", model: "unknown-model" },
         async () => modelsResponse(),
       )).rejects.toMatchObject({ code: "model_not_available" });
-      expect(createRepositories(database).providers.list()).toHaveLength(0);
+      expect((await createRepositories(database).providers.list())).toHaveLength(0);
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
   it("rejects invalid credentials without persisting the key", async () => {
-    const { directory, database, store } = setup();
+    const { directory, database, store } = (await setup());
     try {
       await expect(createDeepSeekProviderSetup(
         database, store, { apiKey: "invalid-key", model: "deepseek-chat" },
         async () => new Response("denied", { status: 401 }),
       )).rejects.toMatchObject({ code: "invalid_credentials" });
-      expect(createRepositories(database).providers.list()).toHaveLength(0);
+      expect((await createRepositories(database).providers.list())).toHaveLength(0);
       expect(existsSync(join(directory, "secrets")) ? readdirSync(join(directory, "secrets")) : []).toHaveLength(0);
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
   it("rejects a second DeepSeek provider before making another request", async () => {
-    const { database, store } = setup();
-    createRepositories(database).providers.create({
+    const { database, store } = (await setup());
+    (await createRepositories(database).providers.create({
       id: "existing", name: "DeepSeek", status: "ready", authMode: "api_key",
-    });
+    }));
     let fetchCount = 0;
     try {
       await expect(createDeepSeekProviderSetup(
@@ -98,16 +98,16 @@ describe("DeepSeek provider setup", () => {
       )).rejects.toBeInstanceOf(ProviderSetupError);
       expect(fetchCount).toBe(0);
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
   it("deletes a newly encrypted key if provider persistence fails", async () => {
-    const { directory, database, store } = setup();
+    const { directory, database, store } = (await setup());
     const originalPut = store.put.bind(store);
     store.put = (secret: string) => {
       const reference = originalPut(secret);
-      database.close();
+      database.prepare = () => { throw new Error("Injected persistence failure"); };
       return reference;
     };
     await expect(createDeepSeekProviderSetup(
@@ -123,34 +123,34 @@ describe("DeepSeek provider setup", () => {
       new Response("x".repeat(300_000), { headers: { "content-type": "application/json" } }),
       new Response(null, { status: 503 }),
     ]) {
-      const { directory, database, store } = setup();
+      const { directory, database, store } = (await setup());
       try {
         await expect(createDeepSeekProviderSetup(
           database, store, { apiKey: "valid-key", model: "deepseek-chat" },
           async () => response,
         )).rejects.toMatchObject({ code: "provider_unavailable" });
-        expect(createRepositories(database).providers.list()).toHaveLength(0);
+        expect((await createRepositories(database).providers.list())).toHaveLength(0);
         expect(existsSync(join(directory, "secrets")) ? readdirSync(join(directory, "secrets")) : []).toHaveLength(0);
       } finally {
-        database.close();
+        (await database.close());
       }
     }
   });
 
   it("maps network failures to a safe provider-unavailable error", async () => {
-    const { database, store } = setup();
+    const { database, store } = (await setup());
     try {
       await expect(createDeepSeekProviderSetup(
         database, store, { apiKey: "valid-key", model: "deepseek-chat" },
         async () => { throw new Error("network failed with valid-key"); },
       )).rejects.toMatchObject({ code: "provider_unavailable", message: expect.not.stringContaining("valid-key") });
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
   it("serializes concurrent setup attempts so only one provider is created", async () => {
-    const { database, store } = setup();
+    const { database, store } = (await setup());
     const finishRequests: Array<() => void> = [];
     const fetcher: typeof fetch = async () => new Promise<Response>((resolve) => {
       finishRequests.push(() => resolve(modelsResponse()));
@@ -163,9 +163,9 @@ describe("DeepSeek provider setup", () => {
       ]);
       expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
       expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
-      expect(createRepositories(database).providers.list()).toHaveLength(1);
+      expect((await createRepositories(database).providers.list())).toHaveLength(1);
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 });

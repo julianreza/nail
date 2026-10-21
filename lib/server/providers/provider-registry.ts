@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { Database } from "../db/database";
 import type { SubscriptionCompletion, SubscriptionConnector } from "../../domain/subscription-provider";
 import { createRepositories } from "../db/repositories";
 import type { EncryptedSecretStore } from "./secret-store";
@@ -7,7 +7,7 @@ import { SubscriptionProviderError } from "./subscription-errors";
 import { completeProviderText } from "./subscription-adapter";
 
 export interface ProviderRegistryDependencies {
-  database: DatabaseSync;
+  database: Database;
   connector: SubscriptionConnector;
   secretStore?: EncryptedSecretStore;
   getSecretStore?: () => EncryptedSecretStore;
@@ -50,7 +50,7 @@ function normalizeDeepSeekResult(
 export function createProviderRegistry(dependencies: ProviderRegistryDependencies): ProviderRegistry {
   return {
     async completeText(input: CompleteProviderTextRequest): Promise<SubscriptionCompletion> {
-      const provider = createRepositories(dependencies.database).providers.getById(input.providerId);
+      const provider = (await createRepositories(dependencies.database).providers.getById(input.providerId));
       if (!provider) throw new SubscriptionProviderError("invalid_binding");
       if (provider.kind === "deepseek" && provider.authMode === "api_key") {
         const secretStore = dependencies.secretStore ?? dependencies.getSecretStore?.();

@@ -19,22 +19,22 @@ const approvalScope: ApprovalScope = {
   costLimitMicrounits: 5_000_000,
 };
 
-function createDatabasePath(): string {
+function createDatabaseIdentity(): string {
   const directory = mkdtempSync(join(tmpdir(), "nail-approval-test-"));
   temporaryDirectories.push(directory);
-  return join(directory, "orchestrator.sqlite");
+  return join(directory, "orchestrator-database");
 }
 
-function createRun(databasePath: string) {
-  const database = openDatabase(databasePath);
-  createRepositories(database).projects.create({ id: "project-1", name: "Nail" });
-  createRepositories(database).runs.create({
+async function createRun(databaseUrl: string) {
+  const database = (await openDatabase(databaseUrl));
+  (await createRepositories(database).projects.create({ id: "project-1", name: "Nail" }));
+  (await createRepositories(database).runs.create({
     id: "run-1",
     projectId: "project-1",
     state: "draft",
     planVersion: 1,
     baselineCommit: "base-1",
-  });
+  }));
   return database;
 }
 
@@ -45,97 +45,97 @@ afterEach(() => {
 });
 
 describe("server-validated approvals", () => {
-  it("requires exact approval before queueing and execution", () => {
-    const database = createRun(createDatabasePath());
+  it("requires exact approval before queueing and execution", async () => {
+    const database = (await createRun(createDatabaseIdentity()));
     const service = createApprovalService(database, { allowedPermissions });
     try {
-      const approval = service.submitForApproval("run-1", approvalScope);
+      const approval = (await service.submitForApproval("run-1", approvalScope));
       expect(approval.decision).toBe("pending");
-      expect(service.isExecutionApproved("run-1", approvalScope)).toBe(false);
+      expect((await service.isExecutionApproved("run-1", approvalScope))).toBe(false);
 
-      service.decide(approval.id, {
+      (await service.decide(approval.id, {
         decision: "approved",
         expectedFingerprint: approval.payloadFingerprint,
-      });
+      }));
 
-      expect(createRepositories(database).runs.getById("run-1")?.state).toBe("queued");
-      expect(service.isExecutionApproved("run-1", approvalScope)).toBe(true);
+      expect((await createRepositories(database).runs.getById("run-1"))?.state).toBe("queued");
+      expect((await service.isExecutionApproved("run-1", approvalScope))).toBe(true);
       expect(
-        service.isExecutionApproved("run-1", {
+        (await service.isExecutionApproved("run-1", {
           ...approvalScope,
           verificationCommands: ["bun run lint"],
-        }),
+        })),
       ).toBe(false);
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
-  it("rejects approval when the plan version or repository baseline changed", () => {
+  it("rejects approval when the plan version or repository baseline changed", async () => {
     for (const change of [
       "UPDATE runs SET plan_version = 2 WHERE id = 'run-1'",
       "UPDATE runs SET baseline_commit = 'base-2' WHERE id = 'run-1'",
     ]) {
-      const database = createRun(createDatabasePath());
+      const database = (await createRun(createDatabaseIdentity()));
       const service = createApprovalService(database, { allowedPermissions });
       try {
-        const approval = service.submitForApproval("run-1", approvalScope);
-        database.exec(change);
-        expect(() =>
-          service.decide(approval.id, {
+        const approval = (await service.submitForApproval("run-1", approvalScope));
+        (await database.exec(change));
+        await expect(async () =>
+          (await service.decide(approval.id, {
             decision: "approved",
             expectedFingerprint: approval.payloadFingerprint,
-          }),
-        ).toThrow();
-        expect(createRepositories(database).runs.getById("run-1")?.state).toBe(
+          })),
+        ).rejects.toThrow();
+        expect((await createRepositories(database).runs.getById("run-1"))?.state).toBe(
           "awaiting_approval",
         );
-        expect(createRepositories(database).approvals.getById(approval.id)?.decision).toBe(
+        expect((await createRepositories(database).approvals.getById(approval.id))?.decision).toBe(
           "pending",
         );
       } finally {
-        database.close();
+        (await database.close());
       }
     }
   });
 
-  it("rejects stale UI fingerprints and permission expansion", () => {
-    const database = createRun(createDatabasePath());
+  it("rejects stale UI fingerprints and permission expansion", async () => {
+    const database = (await createRun(createDatabaseIdentity()));
     const service = createApprovalService(database, { allowedPermissions });
     try {
-      const approval = service.submitForApproval("run-1", approvalScope);
-      expect(() =>
-        service.decide(approval.id, {
+      const approval = (await service.submitForApproval("run-1", approvalScope));
+      await expect(async () =>
+        (await service.decide(approval.id, {
           decision: "approved",
           expectedFingerprint: "stale-fingerprint",
-        }),
-      ).toThrow();
-      expect(() =>
-        service.submitForApproval("run-1", {
+        })),
+      ).rejects.toThrow();
+      await expect(async () =>
+        (await service.submitForApproval("run-1", {
           ...approvalScope,
           permissions: ["workspace:read", "production:deploy"],
-        }),
-      ).toThrow();
+        })),
+      ).rejects.toThrow();
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
-  it("rejects model-authored status fields and forbidden transitions", () => {
-    const database = createRun(createDatabasePath());
+  it("rejects model-authored status fields and forbidden transitions", async () => {
+    const database = (await createRun(createDatabaseIdentity()));
     const service = createApprovalService(database, { allowedPermissions });
     try {
-      expect(() =>
-        service.submitForApproval("run-1", {
+      await expect(async () =>
+        (await service.submitForApproval("run-1", {
           ...approvalScope,
           status: "done",
-        } as ApprovalScope),
-      ).toThrow();
-      expect(() => service.transitionRun("run-1", "done", "model" as never)).toThrow();
-      expect(() => service.transitionRun("run-1", "running", "owner")).toThrow();
-      expect(createRepositories(database).runs.getById("run-1")?.state).toBe("draft");
+        } as ApprovalScope)),
+      ).rejects.toThrow();
+      await expect(async () => (await service.transitionRun("run-1", "done", "model" as never))).rejects.toThrow();
+      await expect(async () => (await service.transitionRun("run-1", "running", "owner"))).rejects.toThrow();
+      expect((await createRepositories(database).runs.getById("run-1"))?.state).toBe("draft");
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 });

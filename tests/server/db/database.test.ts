@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,10 +10,10 @@ import {
 
 const temporaryDirectories: string[] = [];
 
-function createDatabasePath(): string {
-  const directory = mkdtempSync(join(tmpdir(), "nail-sqlite-test-"));
+function createDatabaseIdentity(): string {
+  const directory = mkdtempSync(join(tmpdir(), "nail-postgres-test-"));
   temporaryDirectories.push(directory);
-  return join(directory, "orchestrator.sqlite");
+  return join(directory, "orchestrator-database");
 }
 
 afterEach(() => {
@@ -22,22 +22,16 @@ afterEach(() => {
   }
 });
 
-describe("SQLite persistence", () => {
-  it("migrates an empty database and enables WAL and foreign keys", () => {
-    const path = createDatabasePath();
-    const db = openDatabase(path);
+describe("PostgreSQL persistence", () => {
+  it("migrates an empty PostgreSQL database with foreign keys", async () => {
+    const path = createDatabaseIdentity();
+    const db = (await openDatabase(path));
     try {
-      expect(statSync(path).mode & 0o777).toBe(0o600);
-      expect(db.prepare("PRAGMA journal_mode").get()).toMatchObject({
-        journal_mode: "wal",
-      });
-      expect(db.prepare("PRAGMA foreign_keys").get()).toMatchObject({
-        foreign_keys: 1,
-      });
+      expect(await db.prepare("SELECT version() AS version").get()).toMatchObject({ version: expect.stringContaining("PostgreSQL") });
       expect(
-        db.prepare(
+        (await db.prepare(
           "SELECT version FROM schema_migrations ORDER BY version",
-        ).all(),
+        ).all()),
       ).toEqual([
         { version: 1 },
         { version: 2 },
@@ -49,71 +43,72 @@ describe("SQLite persistence", () => {
         { version: 8 },
         { version: 9 },
         { version: 10 },
+        { version: 11 },
       ]);
       expect(
-        db
+        (await db
           .prepare(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('projects', 'agents', 'providers', 'conversations', 'runs', 'tasks', 'task_dependencies', 'approvals', 'leases', 'events', 'qa_results', 'artifacts', 'usage_records', 'run_workspaces', 'checkpoints', 'run_usage_budgets', 'run_plans', 'qa_rounds', 'provider_account_bindings') ORDER BY name",
+            "SELECT tablename FROM pg_tables WHERE schemaname = current_schema() AND tablename <> 'schema_migrations' ORDER BY tablename",
           )
-          .all(),
+          .all()),
       ).toHaveLength(19);
     } finally {
-      db.close();
+      (await db.close());
     }
   });
 
-  it("rolls back a multi-repository write when a foreign key fails", () => {
-    const db = openDatabase(createDatabasePath());
+  it("rolls back a multi-repository write when a foreign key fails", async () => {
+    const db = (await openDatabase(createDatabaseIdentity()));
     const repositories = createRepositories(db);
     try {
-      expect(() =>
-        withTransaction(db, () => {
-          repositories.projects.create({ id: "project-1", name: "Nail" });
-          repositories.agents.create({
+      await expect(async () =>
+        (await withTransaction(db, async () => {
+          (await repositories.projects.create({ id: "project-1", name: "Nail" }));
+          (await repositories.agents.create({
             id: "agent-1",
             projectId: "missing-project",
             name: "Engineer",
             role: "engineer",
             instructions: "",
-          });
-        }),
-      ).toThrow();
-      expect(repositories.projects.getById("project-1")).toBeNull();
+          }));
+        })),
+      ).rejects.toThrow();
+      expect((await repositories.projects.getById("project-1"))).toBeNull();
     } finally {
-      db.close();
+      (await db.close());
     }
   });
 
-  it("persists projects and produces increasing event IDs across reopen", () => {
-    const path = createDatabasePath();
-    let db = openDatabase(path);
+  it("persists projects and produces increasing event IDs across reopen", async () => {
+    const path = createDatabaseIdentity();
+    let db = (await openDatabase(path));
     let repositories = createRepositories(db);
-    repositories.projects.create({ id: "project-1", name: "Nail" });
-    repositories.runs.create({
+    (await repositories.projects.create({ id: "project-1", name: "Nail" }));
+    (await repositories.runs.create({
       id: "run-1",
       projectId: "project-1",
       state: "draft",
       planVersion: 1,
       baselineCommit: "base-1",
-    });
-    const firstEvent = repositories.events.append({
+    }));
+    const firstEvent = (await repositories.events.append({
       runId: "run-1",
       eventType: "run.created",
       payload: { state: "draft" },
-    });
-    db.close();
+    }));
+    (await db.close());
 
-    db = openDatabase(path);
+    db = (await openDatabase(path));
     repositories = createRepositories(db);
     try {
-      expect(repositories.projects.getById("project-1")?.name).toBe("Nail");
-      const secondEvent = repositories.events.append({
+      expect((await repositories.projects.getById("project-1"))?.name).toBe("Nail");
+      const secondEvent = (await repositories.events.append({
         runId: "run-1",
         eventType: "task.added",
         payload: { taskId: "task-1" },
-      });
+      }));
       expect(secondEvent.id).toBeGreaterThan(firstEvent.id);
-      expect(repositories.events.listAfter("run-1", firstEvent.id)).toEqual([
+      expect((await repositories.events.listAfter("run-1", firstEvent.id))).toEqual([
         expect.objectContaining({
           id: secondEvent.id,
           eventType: "task.added",
@@ -121,7 +116,7 @@ describe("SQLite persistence", () => {
         }),
       ]);
     } finally {
-      db.close();
+      (await db.close());
     }
   });
 });

@@ -23,7 +23,7 @@ export async function handleDashboardRead(
   }
   const handlers = createDashboardReadHandlers(
     auth,
-    process.env.NAIL_DATABASE_PATH,
+    process.env.DATABASE_URL,
   );
-  return handlers[resource](request);
+  return (await handlers[resource](request));
 }

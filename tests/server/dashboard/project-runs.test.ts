@@ -36,7 +36,7 @@ async function createAuthFixture() {
 function createDbPath() {
   const directory = mkdtempSync(join(tmpdir(), "nail-project-runs-test-"));
   tempDirs.push(directory);
-  return join(directory, "db.sqlite");
+  return join(directory, "db-database");
 }
 
 afterEach(() => {
@@ -48,10 +48,10 @@ afterEach(() => {
 describe("project run detail read model", () => {
   it("returns the stored plan, dependency order, and approval without secrets", async () => {
     const path = createDbPath();
-    const database = openDatabase(path);
+    const database = (await openDatabase(path));
     const repositories = createRepositories(database);
-    repositories.projects.create({ id: "project-1", name: "Nail" });
-    repositories.providers.create({
+    (await repositories.projects.create({ id: "project-1", name: "Nail" }));
+    (await repositories.providers.create({
       id: "provider-1",
       name: "DeepSeek",
       status: "needs_login",
@@ -59,9 +59,9 @@ describe("project run detail read model", () => {
       authMode: "api_key",
       secretReference: "secret:private-reference",
       capabilities: ["tools"],
-    });
-    repositories.runs.create({ id: "run-1", projectId: "project-1", state: "awaiting_approval" });
-    repositories.approvals.create({
+    }));
+    (await repositories.runs.create({ id: "run-1", projectId: "project-1", state: "awaiting_approval" }));
+    (await repositories.approvals.create({
       id: "approval-1",
       runId: "run-1",
       payloadFingerprint: "fingerprint",
@@ -69,8 +69,8 @@ describe("project run detail read model", () => {
       planVersion: 1,
       baselineCommit: null,
       scopeJson: JSON.stringify({ setupCommands: ["bun install"], permissions: ["workspace:write"] }),
-    });
-    repositories.runPlans.create({
+    }));
+    (await repositories.runPlans.create({
       runId: "run-1",
       planVersion: 1,
       goal: "Create summary",
@@ -80,10 +80,10 @@ describe("project run detail read model", () => {
       allowedToolsJson: JSON.stringify(["workspace:write"]),
       approvalId: "approval-1",
       approvalFingerprint: "fingerprint",
-    });
-    repositories.tasks.create({ id: "task-1", runId: "run-1", title: "First", state: "done", position: 0 });
-    repositories.tasks.create({ id: "task-2", runId: "run-1", title: "Second", state: "queued", position: 1 });
-    repositories.taskDependencies.set("task-2", ["task-1"]);
+    }));
+    (await repositories.tasks.create({ id: "task-1", runId: "run-1", title: "First", state: "done", position: 0 }));
+    (await repositories.tasks.create({ id: "task-2", runId: "run-1", title: "Second", state: "queued", position: 1 }));
+    (await repositories.taskDependencies.set("task-2", ["task-1"]));
     const authFixture = await createAuthFixture();
     const handler = createProjectRunsReadHandler(authFixture.auth, path);
     try {
@@ -99,7 +99,7 @@ describe("project run detail read model", () => {
       expect(body.runs[0]?.tasks[1]).toMatchObject({ id: "task-2", dependsOn: ["task-1"] });
       expect(JSON.stringify(body)).not.toContain("secret:private-reference");
     } finally {
-      database.close();
+      (await database.close());
     }
   });
 
