@@ -149,6 +149,7 @@
   .dashboard-content .agent-studio,
   .dashboard-content .dashboard-operations { padding: 16px; }
 }
+.dashboard-content .agent-avatar .login-mascot-blink { animation: none; }
 @media (prefers-reduced-motion: reduce) {
   .dashboard-content .agent-role-card,
   .dashboard-content .agent-avatar svg,

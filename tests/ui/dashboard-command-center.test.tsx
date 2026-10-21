@@ -26,6 +26,7 @@ describe("dashboard command center integration", () => {
     expect(css).toContain("animation: none;");
     expect(css).toContain("transition: none;");
     expect(css).toContain("transform: none;");
+    expect(css).toContain(".dashboard-content .agent-avatar .login-mascot-blink");
     expect(css).not.toContain("infinite");
   });
 });
