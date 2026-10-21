@@ -67,7 +67,7 @@ describe("mobile mascot gyroscope", () => {
     expect(h.values.get("--mascot-rotate")).toBe("-2deg");
     expect(h.pupilValues.get("--mascot-eye-x")).toBe("-3px");
     expect(h.pupilValues.get("--mascot-eye-y")).toBe("2px");
-    expect(h.antennaValues.get("--mascot-antenna-rotate")).toBe("-2.5deg");
+    expect(h.antennaValues.get("--mascot-antenna-rotate")).toBe("-4deg");
     expect(h.furValues.get("scale")).toBe("0.4");
     result.cleanup();
   });

@@ -8,8 +8,8 @@
   position: relative;
   z-index: 1;
   display: block;
-  width: 286px;
-  height: 247px;
+  width: 344px;
+  height: 297px;
   padding: 0;
   border: 0;
   appearance: none;
@@ -77,15 +77,15 @@
 
 @keyframes mascot-antenna-sway {
   0%, 100% { transform: rotate(0deg); }
-  25% { transform: rotate(-5deg); }
-  75% { transform: rotate(5deg); }
+  25% { transform: rotate(-8deg); }
+  75% { transform: rotate(8deg); }
 }
 
 @keyframes mascot-click-bounce {
   0% { transform: translateY(0) scale(1); }
   16% { transform: translateY(2px) scale(1.1, 0.88); }
-  42% { transform: translateY(-28px) scale(0.96, 1.06); }
-  62% { transform: translateY(-23px) scale(1, 1); }
+  42% { transform: translateY(-56px) scale(0.96, 1.06); }
+  62% { transform: translateY(-46px) scale(1, 1); }
   82% { transform: translateY(0) scale(1.08, 0.9); }
   100% { transform: translateY(0) scale(1); }
 }
@@ -124,7 +124,7 @@
   }
 
   .login-page .login-art {
-    min-height: 290px;
+    min-height: 390px;
     margin: 0;
   }
 
@@ -138,7 +138,7 @@
   }
 
   .login-page .login-panel { border-top: 0; }
-  .login-mascot { width: min(286px, 78vw); height: auto; aspect-ratio: 286 / 247; }
+  .login-mascot { width: min(344px, 88vw); height: auto; aspect-ratio: 344 / 297; }
 }
 
 @media (prefers-reduced-motion: reduce) {

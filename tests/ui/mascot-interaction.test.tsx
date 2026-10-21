@@ -54,11 +54,11 @@ describe("interactive monster mascot", () => {
     expect(css).toContain("animation: mascot-idle-blink");
     expect(css).toContain("animation: mascot-idle-blink 5.8s ease-in-out infinite;");
     expect(css).toContain("prefers-reduced-motion: reduce");
-    expect(css).toContain("width: 286px;");
+    expect(css).toContain("width: 344px;");
     expect(css).toContain("mascot-click-bounce 720ms ease-out 1 both");
-    expect(referenceTheme).toContain("width: 180px;");
-    expect(referenceTheme).toContain("height: 180px;");
-    expect(referenceTheme).toContain("width: 146px;");
-    expect(referenceTheme).toContain("height: 121px;");
+    expect(referenceTheme).toContain("width: 216px;");
+    expect(referenceTheme).toContain("height: 216px;");
+    expect(referenceTheme).toContain("width: 175px;");
+    expect(referenceTheme).toContain("height: 145px;");
   });
 });

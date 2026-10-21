@@ -50,7 +50,7 @@ describe("mascot tracking", () => {
     expect(h.values.get("--mascot-rotate")).toBe("4deg");
     expect(h.pupilValues.get("--mascot-eye-x")).toBe("6px");
     expect(h.pupilValues.get("--mascot-eye-y")).toBe("4px");
-    expect(h.antennaValues.get("--mascot-antenna-rotate")).toBe("5deg");
+    expect(h.antennaValues.get("--mascot-antenna-rotate")).toBe("8deg");
     expect(h.furValues.get("scale")).toBe("0.8");
     cleanup();
   });

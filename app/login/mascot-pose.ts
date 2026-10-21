@@ -41,7 +41,7 @@ export function getMascotPose(
     headX: nx * 3,
     headY: ny * 2,
     rotate: nx * 4,
-    antennaRotate: nx * 5,
+    antennaRotate: nx * 8,
     furScale: Math.max(Math.abs(nx), Math.abs(ny)) * 0.8,
   };
 }
@@ -61,7 +61,7 @@ export function getMascotPoseFromOrientation(beta: number | null, gamma: number 
     headX: nx * 3,
     headY: ny * 2,
     rotate: nx * 4,
-    antennaRotate: nx * 5,
+    antennaRotate: nx * 8,
     furScale: Math.max(Math.abs(nx), Math.abs(ny)) * 0.8,
   };
 }
