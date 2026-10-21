@@ -12,6 +12,10 @@ vi.mock("next/navigation", () => ({
 describe("reference workspace presentation", () => {
   it("identifies the current page and retains one active navigation item and real destinations", () => {
     const markup = renderToStaticMarkup(<WorkspaceShell>Content</WorkspaceShell>);
+    expect(markup).toContain('aria-label="Nail — ringkasan"');
+    expect(markup).toContain("data-mascot-brand");
+    expect(markup).toContain('viewBox="0 0 240 200"');
+    expect(markup).not.toContain("data-mascot-gyro-toggle");
     expect(markup).toContain('aria-label="Halaman aktif"');
     expect(markup).toMatch(/aria-label="Halaman aktif"[^>]*>Providers</);
     expect(markup.match(/aria-current="page"/g)).toHaveLength(1);

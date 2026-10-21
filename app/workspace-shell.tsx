@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import LogoutButton from "./logout-button";
 import WorkspaceIcon from "./workspace-icon";
+import MascotIllustration from "./mascot-illustration";
 
 const primaryLinks = [
   { href: "/", label: "Ringkasan", icon: "overview" },
@@ -24,7 +25,9 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
     <div className="workspace-layout">
       <aside className="workspace-sidebar">
         <Link className="workspace-brand" href="/" aria-label="Nail — ringkasan">
-          <span className="workspace-brand-mark" aria-hidden="true">N</span>
+          <span className="workspace-brand-mark mascot-brand-mark" data-mascot-brand aria-hidden="true">
+            <MascotIllustration />
+          </span>
           <span>
             <strong>Nail</strong>
             <small>Agent workspace</small>
