@@ -39,3 +39,21 @@ export function getMascotPose(
     rotate: nx * 4,
   };
 }
+
+export function getMascotPoseFromOrientation(beta: number | null, gamma: number | null): MascotPose {
+  if (beta === null || gamma === null || !Number.isFinite(beta) || !Number.isFinite(gamma)) {
+    return { ...NEUTRAL_POSE };
+  }
+
+  const clamp = (value: number) => Math.max(-1, Math.min(1, value));
+  const nx = clamp(gamma / 30);
+  const ny = clamp(beta / 30);
+
+  return {
+    eyeX: nx * 6,
+    eyeY: ny * 4,
+    headX: nx * 3,
+    headY: ny * 2,
+    rotate: nx * 4,
+  };
+}

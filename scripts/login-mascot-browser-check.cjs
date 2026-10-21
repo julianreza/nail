@@ -51,14 +51,44 @@ if (!base) throw new Error("Set NAIL_UI_URL to the loopback preview origin");
     });
     const touchPage = await mobile.newPage();
     await touchPage.goto(`${base}/login`, { waitUntil: "networkidle" });
+    await touchPage.bringToFront();
     await touchPage.locator("[data-login-mascot]").waitFor({ state: "visible" });
     await touchPage.mouse.move(10, 10);
     assert.equal(await touchPage.locator("[data-login-mascot]").evaluate((el) => el.style.getPropertyValue("--mascot-eye-x")), "0px");
     assert.equal(await touchPage.locator(".login-mascot-blink").evaluate((el) => getComputedStyle(el).animationName), "none");
+    assert.notEqual(await touchPage.locator(".login-mascot-pupils").evaluate((el) => getComputedStyle(el).transitionDuration), "0s");
+    await touchPage.evaluate(() => {
+      Object.defineProperty(window, "DeviceOrientationEvent", {
+        configurable: true,
+        value: { requestPermission: async () => "granted" },
+      });
+    });
+    const gyroToggle = touchPage.locator("[data-mascot-gyro-toggle]");
+    await gyroToggle.click();
+    await touchPage.waitForFunction(() => document.querySelector("[data-mascot-gyro-toggle]").getAttribute("aria-pressed") === "true");
+    await touchPage.evaluate(() => {
+      window.dispatchEvent(Object.assign(new Event("deviceorientation"), { beta: 15, gamma: -15 }));
+    });
+    await touchPage.waitForFunction(() => document.querySelector("[data-login-mascot]").style.getPropertyValue("--mascot-eye-x") === "-3px");
+    await touchPage.waitForFunction(
+      () => Math.abs(new DOMMatrix(getComputedStyle(document.querySelector(".login-mascot-pupils")).transform).m41 + 3) < 0.05,
+      null,
+      { polling: 100 },
+    );
+    await gyroToggle.click();
+    assert.equal(await touchPage.locator("[data-login-mascot]").evaluate((el) => el.style.getPropertyValue("--mascot-eye-x")), "0px");
+    await touchPage.evaluate(() => {
+      Object.defineProperty(window, "DeviceOrientationEvent", {
+        configurable: true,
+        value: { requestPermission: async () => "denied" },
+      });
+    });
+    await gyroToggle.click();
+    assert.match(await gyroToggle.innerText(), /Izin sensor ditolak/);
     assert.deepEqual(errors, []);
     await mobile.close();
     await context.close();
-    console.log("PASS: mascot render, cursor gaze, responsive login, reduced motion, touch fallback, no JS errors");
+    console.log("PASS: mascot render, desktop gaze, mobile tilt opt-in/denial, responsive layout, reduced motion, no JS errors");
   } finally {
     await browser.close();
   }

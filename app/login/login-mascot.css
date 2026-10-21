@@ -34,6 +34,22 @@
   animation: nail-mascot-blink 6s infinite;
 }
 
+.login-mascot-motion-control { display: none; }
+.login-mascot-motion-button {
+  padding: 6px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--background);
+  box-shadow: 2px 2px 0 var(--line);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.login-mascot-motion-button:focus-visible { outline: 3px solid var(--lime); outline-offset: 3px; }
+.login-mascot-motion-button:disabled { cursor: wait; opacity: 0.7; }
+
 @keyframes nail-mascot-blink {
   0%, 92%, 96%, 100% { transform: scaleY(1); }
   94% { transform: scaleY(0.08); }
@@ -57,16 +73,28 @@
   }
 
   .login-page .login-art {
-    min-height: 160px;
+    min-height: 200px;
     margin: 0;
+  }
+
+  .login-page .login-mascot-motion-control {
+    position: absolute;
+    bottom: 2px;
+    left: 50%;
+    display: block;
+    transform: translateX(-50%);
   }
 
   .login-page .login-panel { border-top: 0; }
   .login-mascot { width: 180px; height: 156px; }
 }
 
-@media (prefers-reduced-motion: reduce), (hover: none), (pointer: coarse) {
+@media (prefers-reduced-motion: reduce) {
   .login-mascot-blink { animation: none; }
   .login-mascot-head,
   .login-mascot-pupils { transition: none; }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .login-mascot-blink { animation: none; }
 }

@@ -4,6 +4,13 @@ import { describe, expect, it } from "vitest";
 import LoginMascot from "../../app/login/login-mascot";
 
 describe("login mascot", () => {
+  it("shows a separate opt-in control for phone motion", () => {
+    const html = renderToStaticMarkup(createElement(LoginMascot));
+    expect(html).toContain("data-mascot-gyro-toggle");
+    expect(html).toContain("Aktifkan gerak");
+    expect(html).toContain('type="button"');
+  });
+
   it("server-renders decorative original SVG without a network asset or focus target", () => {
     const html = renderToStaticMarkup(createElement(LoginMascot));
     expect(html).toContain("data-login-mascot");
