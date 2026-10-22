@@ -2,9 +2,9 @@
 
 ## Current support status
 
-Nail exposes owner-only provider setup, connection checks, disconnect, and safe status display. A successful binding is not currently available for model use: local CLI adapters return `not_installed` when the configured binary is absent, `unsupported` when its subscription-auth status cannot be verified, and a fail-closed isolation error for inference. Claude is disabled until its subscription policy and official CLI auth flow are verified. No live account or model request was tested in this workspace.
+Nail has two separate Codex connection paths: the legacy administrator-managed CLI binding and an experimental owner-only direct ChatGPT OAuth integration with no CLI installation. The direct path is disabled by default and only enabled after the OAuth client/backend permission and compatibility review; see [Codex direct OAuth](codex-direct-oauth.md). A successful direct login/model catalog still remains unavailable for orchestration. CLI subscription adapters likewise remain fail-closed until the exact CLI auth policy, isolation, and finite output budget are proven. No live account or model request was used in automated tests.
 
-The panel does not accept API keys or login tokens. The owner must install and authenticate an official CLI locally on the connector host; Nail does not read token files or copy credentials between applications.
+The panel does not accept API keys or pasted login tokens. Direct OAuth prompts the owner to complete device login on the fixed official ChatGPT page; Nail stores only the encrypted account credentials server-side. The CLI path continues to use a dedicated connector account home and never reads or copies credentials from the personal cache.
 
 ## Connector configuration
 
@@ -53,7 +53,8 @@ Stop with `Ctrl+C` during local development or send `SIGTERM` to the service pro
 
 ## Official CLI notes
 
-- **Codex:** official docs support ChatGPT sign-in (`codex login`) and distinguish it from API-key billing. Nail parses only recognized cached auth-status messages from stderr in a dedicated HOME/CODEX_HOME with explicit file storage; API-key mode never counts as connected. See [Codex OAuth setup](codex-cli-oauth.md) for private-terminal login and headless alternatives. Parsing is source-verified with synthetic tests; live login compatibility is unverified until owner acceptance. A connected account remains unavailable for inference.
+- **Codex CLI:** official docs support ChatGPT sign-in (`codex login`) and distinguish it from API-key billing. The legacy CLI path parses only recognized cached auth-status messages in a dedicated HOME/CODEX_HOME; API-key mode never counts as connected. See [Codex CLI OAuth setup](codex-cli-oauth.md).
+- **Codex direct OAuth (experimental):** the optional no-CLI Nail path uses owner-initiated device login and a server-side encrypted account. It is disabled by default; do not enable until the OpenAI OAuth-client/backend permission and compatibility review is complete. A connected account/model catalog stays provider `unavailable`, with no inference capabilities. See [Codex direct OAuth](codex-direct-oauth.md). Synthetic protocol fixtures are not evidence of a live login or vendor approval.
 - **Antigravity:** official docs call the CLI `agy` and document `agy models` plus headless JSONL. Nail has not verified personal OAuth status or tool-denial behavior for an installed version; no `agy login` command is assumed.
 - **Claude Code:** official authentication/policy docs were blocked during the compatibility review. The UI intentionally blocks it; do not configure a different billing/auth mode to bypass that gate.
 
