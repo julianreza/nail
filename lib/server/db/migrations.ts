@@ -340,6 +340,46 @@ const migrations: readonly Migration[] = [
       END $$;
     `,
   },
+  {
+    version: 12,
+    name: "agent_configuration_and_revision",
+    sql: `
+      ALTER TABLE agents
+        ADD COLUMN model TEXT,
+        ADD COLUMN skill_ids_json TEXT NOT NULL DEFAULT '[]',
+        ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+        ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;
+      UPDATE agents
+      SET model = providers.model
+      FROM providers
+      WHERE agents.provider_id = providers.id;
+      UPDATE agents SET updated_at = created_at;
+      ALTER TABLE agents
+        ADD CONSTRAINT agent_skill_ids_array
+          CHECK (jsonb_typeof(skill_ids_json::jsonb) = 'array'
+            AND jsonb_array_length(skill_ids_json::jsonb) <= 10),
+        ADD CONSTRAINT agent_model_format
+          CHECK (model IS NULL OR model ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$');
+
+      DO $$
+      DECLARE owner_agent_attnum SMALLINT; owner_agent_fk TEXT;
+      BEGIN
+        SELECT attnum INTO owner_agent_attnum
+        FROM pg_attribute
+        WHERE attrelid = 'tasks'::regclass AND attname = 'owner_agent_id' AND NOT attisdropped;
+        SELECT conname INTO owner_agent_fk
+        FROM pg_constraint
+        WHERE conrelid = 'tasks'::regclass AND contype = 'f'
+          AND conkey = ARRAY[owner_agent_attnum]::SMALLINT[];
+        IF owner_agent_fk IS NULL THEN
+          RAISE EXCEPTION 'Expected tasks owner_agent_id foreign key';
+        END IF;
+        EXECUTE format('ALTER TABLE tasks DROP CONSTRAINT %I', owner_agent_fk);
+        ALTER TABLE tasks ADD CONSTRAINT tasks_owner_agent_id_fkey
+          FOREIGN KEY (owner_agent_id) REFERENCES agents(id) ON DELETE RESTRICT;
+      END $$;
+    `,
+  },
 ];
 
 export async function migrateDatabase(database: Database): Promise<void> {

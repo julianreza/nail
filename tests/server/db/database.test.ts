@@ -44,6 +44,7 @@ describe("PostgreSQL persistence", () => {
         { version: 9 },
         { version: 10 },
         { version: 11 },
+        { version: 12 },
       ]);
       expect(
         (await db

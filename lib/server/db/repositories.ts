@@ -21,7 +21,11 @@ export interface AgentRecord {
   name: string;
   role: string;
   instructions: string;
+  model: string | null;
+  skillIds: string[];
+  revision: number;
   createdAt: string;
+  updatedAt: string;
 }
 
 export type ProviderAuthMode = "api_key" | "subscription_cli" | "none";
@@ -198,6 +202,11 @@ function mapRow<T>(row: unknown): T {
   return mapped as T;
 }
 
+function mapAgentRow(row: unknown): AgentRecord {
+  const { skillIdsJson, ...agent } = mapRow<Omit<AgentRecord, "skillIds"> & { skillIdsJson: string }>(row);
+  return { ...agent, skillIds: JSON.parse(skillIdsJson) as string[] };
+}
+
 async function findById<T>(
   database: Database,
   table: string,
@@ -253,27 +262,32 @@ export function createRepositories(database: Database) {
       name: string;
       role: string;
       instructions?: string;
+      model?: string | null;
+      skillIds?: string[];
     }): Promise<AgentRecord> {
-      (await database
-        .prepare(
-          `INSERT INTO agents (id, project_id, provider_id, name, role, instructions)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-        )
-        .run(
-          input.id,
-          input.projectId ?? null,
-          input.providerId ?? null,
-          input.name,
-          input.role,
-          input.instructions ?? "",
-        ));
-      return (await findById<AgentRecord>(database, "agents", input.id))!;
+      await database.prepare(
+        `INSERT INTO agents (
+           id, project_id, provider_id, name, role, instructions, model, skill_ids_json
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      ).run(
+        input.id,
+        input.projectId ?? null,
+        input.providerId ?? null,
+        input.name,
+        input.role,
+        input.instructions ?? "",
+        input.model ?? null,
+        JSON.stringify(input.skillIds ?? []),
+      );
+      return (await this.getById(input.id))!;
     },
     async getById(id: string): Promise<AgentRecord | null> {
-      return (await findById(database, "agents", id));
+      const row = await database.prepare("SELECT * FROM agents WHERE id = $1").get(id);
+      return row === undefined ? null : mapAgentRow(row);
     },
     async list(): Promise<AgentRecord[]> {
-      return (await listRecords(database, "agents"));
+      return (await database.prepare("SELECT * FROM agents ORDER BY created_at ASC, id ASC").all())
+        .map(mapAgentRow);
     },
   };
 
