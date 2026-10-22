@@ -81,6 +81,30 @@ afterEach(() => {
 });
 
 describe("owner-only subscription handlers", () => {
+  it("persists connected OAuth without granting provider readiness", async () => {
+    const context = setup({ connector: { check: async () => ({
+      kind: "codex", state: "connected", reason: null, model: binding.model,
+      checkedAt: "2026-10-21T00:00:00.000Z",
+    }) } });
+    const response = await context.setupProvider(post({ kind: "codex", bindingId: binding.bindingId, model: binding.model }));
+    expect(response.status).toBe(201);
+    const payload = await response.json() as { provider: { id: string }; connection: { state: string } };
+    expect(payload).toMatchObject({ provider: { status: "unavailable", capabilities: [] }, connection: { state: "connected" } });
+    const checked = await context.connection(payload.provider.id, action({ action: "check" }));
+    expect(checked.status).toBe(200);
+    expect(await checked.json()).toMatchObject({ provider: { id: payload.provider.id, status: "unavailable" }, connection: { state: "connected" } });
+    const database = await openDatabase(context.databaseUrl);
+    try {
+      const repos = createRepositories(database);
+      expect(await repos.providers.getById(payload.provider.id)).toMatchObject({ status: "unavailable", capabilities: [] });
+      expect(await repos.accountBindings.getByProviderId(payload.provider.id)).toMatchObject({ state: "connected" });
+    } finally {
+      await database.close();
+    }
+    expect(JSON.stringify(payload)).not.toContain(binding.home);
+    expect(JSON.stringify(payload)).not.toContain("auth.json");
+  });
+
   it("creates one unavailable binding with safe diagnostic fields when the CLI is absent", async () => {
     const context = setup();
     const response = await context.setupProvider(post({ kind: "codex", bindingId: binding.bindingId, model: binding.model }));
