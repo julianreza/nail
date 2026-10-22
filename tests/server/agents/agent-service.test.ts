@@ -135,7 +135,7 @@ describe("agent configuration service", () => {
   });
 
   it("does not offer models for a direct OAuth provider without an account row", async () => {
-    const { database, repositories, service } = await setup();
+    const { repositories, service } = await setup();
     await repositories.providers.create({
       id: "orphan-direct", name: "Direct Codex", kind: "codex", authMode: "subscription_oauth",
       status: "unavailable", model: "legacy-model", capabilities: [],
