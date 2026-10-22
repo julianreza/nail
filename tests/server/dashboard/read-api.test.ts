@@ -81,6 +81,7 @@ describe("authenticated dashboard read APIs", () => {
     expect(await overview.json()).toEqual({
       projectsCount: 0,
       agentsCount: 0,
+      agents: [],
       activeRunsCount: 0,
       queuedRunsCount: 0,
       pendingApprovalsCount: 0,
@@ -157,6 +158,11 @@ describe("authenticated dashboard read APIs", () => {
     expect(await overview.json()).toEqual({
       projectsCount: 1,
       agentsCount: 1,
+      agents: [{
+        id: "agent-1", name: "FE", role: "frontend", projectId: "project-1",
+        providerId: "provider-1", providerName: "DeepSeek", providerStatus: "ready",
+        model: null, modelMatchesProvider: false, skillIds: [],
+      }],
       activeRunsCount: 1,
       queuedRunsCount: 0,
       pendingApprovalsCount: 1,

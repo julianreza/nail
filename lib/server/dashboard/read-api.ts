@@ -1,6 +1,6 @@
-import type { Database } from "../db/database";
-import { openDatabase } from "../db/database";
+import { type Database, openDatabase, withTransaction } from "../db/database";
 import { createRepositories } from "../db/repositories";
+import { createAgentService } from "../agents/agent-service";
 
 interface AuthGuard {
   protectedResource(request: Request): Promise<Response>;
@@ -45,28 +45,26 @@ export function createDashboardReadHandlers(
 
   return {
     overview(request: Request): Promise<Response> {
-      return read(request, async (database) => ({
-        projectsCount: (await count(database, "SELECT COUNT(*) AS total FROM projects")),
-        agentsCount: (await count(database, "SELECT COUNT(*) AS total FROM agents")),
-        activeRunsCount: (await count(
-          database,
-          "SELECT COUNT(*) AS total FROM runs WHERE state IN ('running', 'awaiting_review')",
-        )),
-        queuedRunsCount: (await count(
-          database,
-          "SELECT COUNT(*) AS total FROM runs WHERE state = 'queued'",
-        )),
-        pendingApprovalsCount: (await count(
-          database,
-          "SELECT COUNT(*) AS total FROM approvals WHERE decision = 'pending'",
-        )),
+      return read(request, async (database) => withTransaction(database, async () => {
+        const agents = await createAgentService(database).summaries();
+        return {
+          projectsCount: await count(database, "SELECT COUNT(*) AS total FROM projects"),
+          agentsCount: agents.length,
+          agents,
+          activeRunsCount: await count(
+            database,
+            "SELECT COUNT(*) AS total FROM runs WHERE state IN ('running', 'awaiting_review')",
+          ),
+          queuedRunsCount: await count(database, "SELECT COUNT(*) AS total FROM runs WHERE state = 'queued'"),
+          pendingApprovalsCount: await count(database, "SELECT COUNT(*) AS total FROM approvals WHERE decision = 'pending'"),
+        };
       }));
     },
     projects(request: Request): Promise<Response> {
       return read(request, async (_database, repositories) => (await repositories.projects.list()));
     },
     agents(request: Request): Promise<Response> {
-      return read(request, async (_database, repositories) => (await repositories.agents.list()));
+      return read(request, async (database) => await createAgentService(database).list());
     },
     tasks(request: Request): Promise<Response> {
       return read(request, async (_database, repositories) => (await repositories.tasks.list()));
