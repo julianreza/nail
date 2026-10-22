@@ -2,7 +2,13 @@
 
 import type { AgentOptions, AgentView } from "../../lib/domain/agent";
 
-export default function AgentCard({ agent, options }: { agent: AgentView; options: AgentOptions | null }) {
+export default function AgentCard({ agent, options, onEdit, onRequestDelete, pending }: {
+  agent: AgentView;
+  options: AgentOptions | null;
+  onEdit(agent: AgentView): void;
+  onRequestDelete(agent: AgentView): void;
+  pending: boolean;
+}) {
   const provider = options?.providers.find((item) => item.id === agent.providerId);
   const project = options?.projects.find((item) => item.id === agent.projectId);
   const modelMatchesProvider = agent.providerId === null
@@ -39,6 +45,14 @@ export default function AgentCard({ agent, options }: { agent: AgentView; option
         {provider && provider.status !== "ready" ? (
           <p className="agent-form-hint" role="status">Konfigurasi tersimpan; provider belum siap menjalankan agent.</p>
         ) : null}
+      </div>
+      <div className="agent-card-actions">
+        <button className="button-secondary" disabled={pending} onClick={() => onEdit(agent)} type="button" aria-label={`Ubah ${agent.name}`}>
+          Ubah
+        </button>
+        <button className="button-danger" disabled={pending} onClick={() => onRequestDelete(agent)} type="button" aria-label={`Hapus ${agent.name}`}>
+          Hapus
+        </button>
       </div>
     </article>
   );

@@ -65,6 +65,10 @@ export default function AgentManager() {
   const [optionsError, setOptionsError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [editorInitial, setEditorInitial] = useState<AgentView | undefined>(undefined);
+  const [deleteCandidate, setDeleteCandidate] = useState<AgentView | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [revisionConflict, setRevisionConflict] = useState(false);
   const [pending, setPending] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -111,21 +115,46 @@ export default function AgentManager() {
     setRetry((value) => value + 1);
   }
 
-  async function createAgent(input: AgentInput) {
+  async function openEditor(agent: AgentView) {
+    setPending(true);
+    setMutationError(null);
+    setRevisionConflict(false);
+    try {
+      const response = await fetch(`/api/agents/${encodeURIComponent(agent.id)}`, { cache: "no-store" });
+      const body = await readJson(response);
+      if (!response.ok || !isRecord(body) || !isAgentView(body.agent) || body.agent.id !== agent.id) {
+        throw new Error(responseError(body, "Konfigurasi agent tidak dapat dimuat."));
+      }
+      setEditorInitial(body.agent);
+      setEditorOpen(true);
+    } catch (error) {
+      setMutationError(error instanceof Error ? error.message : "Konfigurasi agent tidak dapat dimuat.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function saveAgent(input: AgentInput) {
+    const editing = editorInitial;
     setPending(true);
     setMutationError(null);
     setNotice(null);
+    setRevisionConflict(false);
     try {
-      const response = await fetch("/api/agents", {
-        method: "POST",
+      const response = await fetch(editing ? `/api/agents/${encodeURIComponent(editing.id)}` : "/api/agents", {
+        method: editing ? "PUT" : "POST",
         headers: { "content-type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify(input),
+        body: JSON.stringify(editing ? { revision: editing.revision, agent: input } : input),
       });
       const body = await readJson(response);
-      if (!response.ok) throw new Error(responseError(body, "Agent tidak dapat disimpan."));
+      if (!response.ok) {
+        if (isRecord(body) && body.code === "revision_conflict") setRevisionConflict(true);
+        throw new Error(responseError(body, "Agent tidak dapat disimpan."));
+      }
       if (!isRecord(body) || !isAgentView(body.agent)) throw new Error("Respons agent tidak valid.");
-      const id = body.agent.id;
+      const id = editing?.id ?? body.agent.id;
+      if (body.agent.id !== id) throw new Error("ID agent tidak cocok dengan perubahan yang diminta.");
 
       const savedResponse = await fetch(`/api/agents/${encodeURIComponent(id)}`, { cache: "no-store" });
       const savedBody = await readJson(savedResponse);
@@ -141,10 +170,66 @@ export default function AgentManager() {
 
       setAgents(listBody);
       setEditorOpen(false);
-      setNotice("Agent tersimpan.");
+      setEditorInitial(undefined);
+      setNotice(editing ? "Perubahan agent tersimpan." : "Agent tersimpan.");
       window.dispatchEvent(new Event("agent-list-refresh"));
     } catch (error) {
       setMutationError(error instanceof Error ? error.message : "Agent tidak dapat disimpan.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function reloadLatestAgent() {
+    if (!editorInitial) return;
+    setPending(true);
+    setMutationError(null);
+    try {
+      const response = await fetch(`/api/agents/${encodeURIComponent(editorInitial.id)}`, { cache: "no-store" });
+      const body = await readJson(response);
+      if (!response.ok || !isRecord(body) || !isAgentView(body.agent) || body.agent.id !== editorInitial.id) {
+        throw new Error(responseError(body, "Versi terbaru agent tidak dapat dimuat."));
+      }
+      setEditorInitial(body.agent);
+      setRevisionConflict(false);
+    } catch (error) {
+      setMutationError(error instanceof Error ? error.message : "Versi terbaru agent tidak dapat dimuat.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function deleteAgent(agent: AgentView) {
+    setPending(true);
+    setDeleteError(null);
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/agents/${encodeURIComponent(agent.id)}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ revision: agent.revision }),
+      });
+      const body = await readJson(response);
+      if (!response.ok) throw new Error(responseError(body, "Agent tidak dapat dihapus."));
+      if (!isRecord(body) || body.deleted !== true || body.id !== agent.id) throw new Error("Respons penghapusan agent tidak valid.");
+
+      const exactResponse = await fetch(`/api/agents/${encodeURIComponent(agent.id)}`, { cache: "no-store" });
+      const exactBody = await readJson(exactResponse);
+      if (exactResponse.status !== 404 || !isRecord(exactBody) || exactBody.code !== "not_found") {
+        throw new Error("Penghapusan belum dapat diverifikasi; agent tetap ditampilkan.");
+      }
+      const listResponse = await fetch("/api/agents", { cache: "no-store" });
+      const listBody = await readJson(listResponse);
+      if (!listResponse.ok || !isAgentList(listBody) || listBody.some((item) => item.id === agent.id)) {
+        throw new Error("Penghapusan belum dapat diverifikasi; agent tetap ditampilkan.");
+      }
+      setAgents(listBody);
+      setDeleteCandidate(null);
+      setNotice("Agent dihapus.");
+      window.dispatchEvent(new Event("agent-list-refresh"));
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Agent tidak dapat dihapus.");
     } finally {
       setPending(false);
     }
@@ -163,12 +248,29 @@ export default function AgentManager() {
         <button
           className="button-primary"
           disabled={options === null || optionsLoading || pending}
-          onClick={() => { setEditorOpen(true); setMutationError(null); setNotice(null); }}
+          onClick={() => {
+            setEditorInitial(undefined);
+            setEditorOpen(true);
+            setMutationError(null);
+            setRevisionConflict(false);
+            setNotice(null);
+          }}
           type="button"
         >Tambah agent</button>
       </div>
 
       {notice ? <p className="agent-manager-notice" role="status">{notice}</p> : null}
+      {deleteCandidate ? (
+        <section aria-label={`Konfirmasi hapus ${deleteCandidate.name}`} className="agent-delete-confirmation" role="alertdialog">
+          <h3>Konfirmasi hapus</h3>
+          <p>Yakin ingin menghapus agent <strong>{deleteCandidate.name}</strong>? Tindakan ini tidak dapat dibatalkan.</p>
+          {deleteError ? <p className="agent-form-error" role="alert">{deleteError}</p> : null}
+          <div className="agent-form-actions">
+            <button className="button-secondary" disabled={pending} onClick={() => { setDeleteCandidate(null); setDeleteError(null); }} type="button">Batalkan penghapusan</button>
+            <button className="button-danger" disabled={pending} onClick={() => void deleteAgent(deleteCandidate)} type="button">{pending ? "Menghapus…" : "Hapus agent"}</button>
+          </div>
+        </section>
+      ) : null}
       {optionsError ? (
         <div className="state-card state-card-error" role="alert">
           <div><h3>Opsi konfigurasi tidak tersedia</h3><p>Provider, project, dan skill tidak dapat dimuat: {optionsError}</p></div>
@@ -179,12 +281,23 @@ export default function AgentManager() {
       {editorOpen && options ? (
         <section aria-labelledby="agent-editor-title" className="agent-editor-panel">
           <div className="agent-editor-heading">
-            <div><h3 id="agent-editor-title">Tambah agent</h3><p>Pengaturan ini belum mengaktifkan inference provider.</p></div>
+            <div>
+              <h3 id="agent-editor-title">{editorInitial ? "Ubah agent" : "Tambah agent"}</h3>
+              <p>Pengaturan ini belum mengaktifkan inference provider.</p>
+            </div>
           </div>
+          {revisionConflict ? (
+            <div className="state-card state-card-error" role="alert">
+              <p>{mutationError}</p>
+              <button className="button-secondary" disabled={pending} onClick={() => void reloadLatestAgent()} type="button">Muat versi terbaru</button>
+            </div>
+          ) : null}
           <AgentForm
-            error={mutationError}
-            onCancel={() => { setEditorOpen(false); setMutationError(null); }}
-            onSubmit={createAgent}
+            key={editorInitial ? `${editorInitial.id}:${editorInitial.revision}` : "new-agent"}
+            error={revisionConflict ? null : mutationError}
+            initial={editorInitial}
+            onCancel={() => { setEditorOpen(false); setEditorInitial(undefined); setMutationError(null); setRevisionConflict(false); }}
+            onSubmit={saveAgent}
             options={options}
             pending={pending}
           />
@@ -207,7 +320,15 @@ export default function AgentManager() {
           {agentsLoading ? <p className="agent-manager-refresh" role="status">Memperbarui daftar…</p> : null}
           <ul aria-label="Daftar agent tersimpan" className="record-list agent-list">
             {agents?.map((agent) => (
-              <li key={agent.id}><AgentCard agent={agent} options={options} /></li>
+              <li key={agent.id}>
+                <AgentCard
+                  agent={agent}
+                  onEdit={(selected) => { void openEditor(selected); }}
+                  onRequestDelete={(selected) => { setDeleteCandidate(selected); setDeleteError(null); }}
+                  options={options}
+                  pending={pending}
+                />
+              </li>
             ))}
           </ul>
         </>
