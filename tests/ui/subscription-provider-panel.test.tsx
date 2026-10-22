@@ -12,6 +12,13 @@ describe("subscription provider panel", () => {
     expect(markup).toContain("docs/providers/codex-cli-oauth.md");
   });
 
+  it("puts direct OAuth first and keeps CLI setup behind an optional disclosure", () => {
+    const markup = renderToStaticMarkup(createElement(SubscriptionProviderPanel));
+    expect(markup).toContain("Codex Subscription — tanpa CLI");
+    expect(markup).toContain("Hubungkan ChatGPT");
+    expect(markup).toContain("Codex CLI lama (opsional)");
+  });
+
   it("shows the three account providers, never asks for tokens, and labels incomplete availability", () => {
     const markup = renderToStaticMarkup(createElement(SubscriptionProviderPanel));
     expect(markup).toContain("Antigravity");
