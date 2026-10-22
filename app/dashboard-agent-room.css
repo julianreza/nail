@@ -4,7 +4,8 @@
   --room-floor: #f7efe3;
   position: relative;
   isolation: isolate;
-  height: 300px;
+  min-height: 300px;
+  height: auto;
   margin-top: 16px;
   overflow: hidden;
   border: 2px solid var(--line);
@@ -52,12 +53,18 @@
   border: 2px solid var(--line); border-radius: 65% 20% 60% 20%; background: #8bbda0;
 }
 .dashboard-content .agent-room-lanes {
-  position: absolute; z-index: 2; inset: 148px 12px 20px;
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px;
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+  padding: 148px 12px 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-auto-rows: 106px;
+  gap: 4px;
 }
 .dashboard-content .agent-room-lane {
   --duration: 8s; --phase: 0s; --depth: 0px;
-  position: relative; min-width: 0;
+  position: relative; min-width: 0; height: 100px;
 }
 .dashboard-content .agent-room-lane[data-tone="violet"] { --duration: 10s; --phase: -0.4s; --depth: 12px; }
 .dashboard-content .agent-room-lane[data-tone="coral"] { --duration: 12s; --phase: -0.8s; --depth: 4px; }
@@ -81,6 +88,7 @@
 .dashboard-content .agent-room-name {
   position: absolute; bottom: 0; left: 0; right: 0; text-align: center;
   font-size: 12px; font-weight: 750; color: var(--foreground);
+  overflow-wrap: anywhere; word-break: break-word;
 }
 .dashboard-content .agent-room-actor,
 .dashboard-content .agent-room-hop,
@@ -96,8 +104,25 @@
 .dashboard-content .agent-room-toggle:focus-visible { outline: 3px solid var(--foreground); outline-offset: 3px; }
 .dashboard-content .agent-room-toggle:disabled { cursor: default; opacity: 0.65; }
 .dashboard-content .agent-room-controls p { margin: 0; font-size: 12px; color: var(--muted); }
-.dashboard-content .agent-room-legend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 18px 0 8px; }
-.dashboard-content .agent-room-legend article { min-width: 0; }
+.dashboard-content .agent-room-legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  min-width: 0;
+  gap: 14px;
+  margin: 18px 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.dashboard-content .agent-room-legend li { min-width: 0; }
+.dashboard-content .agent-room-legend article {
+  min-width: 0;
+  height: 100%;
+  padding: 14px;
+  border: 1px solid rgb(23 58 50 / 30%);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
 .dashboard-content .agent-room-legend h4 { margin: 0; font-size: 14px; }
 .dashboard-content .agent-room-legend p { margin: 6px 0; font-size: 12px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; }
 @keyframes agent-room-travel {
@@ -117,8 +142,13 @@
   30% { transform: scale(0.7); }
 }
 @media (max-width: 600px) {
-  .dashboard-content .agent-room { height: 260px; }
-  .dashboard-content .agent-room-lanes { inset: 140px 8px 18px; }
+  .dashboard-content .agent-room { min-height: 260px; height: auto; }
+  .dashboard-content .agent-room-lanes {
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    grid-auto-rows: 92px;
+    padding: 140px 8px 18px;
+  }
+  .dashboard-content .agent-room-lane { height: 86px; }
   .dashboard-content .agent-room-hop { width: 64px; }
   .dashboard-content .agent-room-shadow { top: 49px; width: 36px; left: calc(50% - 18px); }
   .dashboard-content .agent-room-legend { grid-template-columns: minmax(0, 1fr); gap: 10px; }

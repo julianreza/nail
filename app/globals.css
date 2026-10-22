@@ -2,6 +2,7 @@
 @import "./reference-theme.css";
 @import "./dashboard-command-center.css";
 @import "./dashboard-agent-room.css";
+@import "./agents/agents.css";
 
 :root {
   --background: #eef4f1;

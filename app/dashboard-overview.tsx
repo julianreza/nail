@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { AgentSummary } from "../lib/domain/agent";
 import WorkspaceIcon from "./workspace-icon";
@@ -106,38 +106,62 @@ export default function DashboardOverview() {
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [retry, setRetry] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const activeController = useRef<AbortController | null>(null);
+  const requestSequence = useRef(0);
+  const hasOverview = useRef(false);
+
+  const loadOverview = useCallback(async () => {
+    const sequence = ++requestSequence.current;
+    activeController.current?.abort();
+    const controller = new AbortController();
+    activeController.current = controller;
+    try {
+      const response = await fetch("/api/overview", { cache: "no-store", signal: controller.signal });
+      const body: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = typeof body === "object" && body !== null && "error" in body &&
+          typeof body.error === "string" ? body.error : "Data tidak dapat dimuat.";
+        throw new Error(message);
+      }
+      if (!isOverviewPayload(body)) throw new Error("Format ringkasan tidak valid.");
+      if (controller.signal.aborted || sequence !== requestSequence.current) return;
+      hasOverview.current = true;
+      setOverview(body);
+      setError(null);
+    } catch (reason) {
+      if (!controller.signal.aborted && sequence === requestSequence.current) {
+        setError(reason instanceof Error ? reason.message : "Data tidak dapat dimuat.");
+      }
+    } finally {
+      if (!controller.signal.aborted && sequence === requestSequence.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    }
+  }, []);
+
+  const refreshOverview = useCallback(() => {
+    if (hasOverview.current) setRefreshing(true);
+    else setLoading(true);
+    setError(null);
+    void loadOverview();
+  }, [loadOverview]);
 
   useEffect(() => {
-    let active = true;
-
-    fetch("/api/overview", { cache: "no-store" })
-      .then(async (response) => {
-        const body: unknown = await response.json().catch(() => null);
-        if (!response.ok) {
-          const message =
-            typeof body === "object" && body !== null && "error" in body &&
-            typeof body.error === "string"
-              ? body.error
-              : "Data tidak dapat dimuat.";
-          throw new Error(message);
-        }
-        if (!isOverviewPayload(body)) throw new Error("Format ringkasan tidak valid.");
-        if (active) setOverview(body);
-      })
-      .catch((reason: unknown) => {
-        if (active) {
-          setError(reason instanceof Error ? reason.message : "Data tidak dapat dimuat.");
-        }
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-
+    const onRefresh = () => refreshOverview();
+    window.addEventListener("agent-list-refresh", onRefresh);
+    window.addEventListener("focus", onRefresh);
+    const initialLoad = window.setTimeout(() => { void loadOverview(); }, 0);
     return () => {
-      active = false;
+      window.clearTimeout(initialLoad);
+      window.removeEventListener("agent-list-refresh", onRefresh);
+      window.removeEventListener("focus", onRefresh);
+      requestSequence.current += 1;
+      activeController.current?.abort();
+      activeController.current = null;
     };
-  }, [retry]);
+  }, [loadOverview, refreshOverview]);
 
   return (
     <section aria-label="Ringkasan workspace" className="dashboard-content">
@@ -149,7 +173,7 @@ export default function DashboardOverview() {
         <span className="dashboard-snapshot-label">Ringkasan tersimpan</span>
       </div>
 
-      {loading ? (
+      {loading && !overview ? (
         <div aria-label="Memuat ringkasan" aria-live="polite" className="dashboard-card-grid">
           {cards.map((card) => (
             <div className="dashboard-stat-card is-loading" key={card.key}>
@@ -158,32 +182,31 @@ export default function DashboardOverview() {
             </div>
           ))}
         </div>
-      ) : error ? (
+      ) : !overview ? (
         <div aria-live="polite" className="state-card state-card-error" role="alert">
           <div>
             <h3>Ringkasan belum tersedia</h3>
-            <p>{error}</p>
+            <p>{error ?? "Data tidak dapat dimuat."}</p>
             {error === "Database is not configured" ? (
               <p className="setup-hint">
                 Set <code>DATABASE_URL</code> server ke koneksi PostgreSQL Supabase untuk memuat data.
               </p>
             ) : null}
           </div>
-          <button
-            className="button-secondary"
-            onClick={() => {
-              setLoading(true);
-              setError(null);
-              setRetry((value) => value + 1);
-            }}
-            type="button"
-          >
-            Coba lagi
-          </button>
+          <button className="button-secondary" onClick={refreshOverview} type="button">Coba lagi</button>
         </div>
-      ) : overview ? (
-        <DashboardSummary overview={overview} />
-      ) : null}
+      ) : (
+        <>
+          {refreshing ? <p className="dashboard-refresh-status" role="status">Memperbarui ringkasan…</p> : null}
+          {error ? (
+            <div aria-live="polite" className="state-card state-card-error dashboard-refresh-warning" role="alert">
+              <div><h3>Data terbaru belum tersedia</h3><p>{error}</p></div>
+              <button className="button-secondary" onClick={refreshOverview} type="button">Coba lagi</button>
+            </div>
+          ) : null}
+          <DashboardSummary overview={overview} />
+        </>
+      )}
     </section>
   );
 }
