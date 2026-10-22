@@ -52,6 +52,9 @@ export function createProviderRegistry(dependencies: ProviderRegistryDependencie
     async completeText(input: CompleteProviderTextRequest): Promise<SubscriptionCompletion> {
       const provider = (await createRepositories(dependencies.database).providers.getById(input.providerId));
       if (!provider) throw new SubscriptionProviderError("invalid_binding");
+      if (provider.authMode === "subscription_oauth") {
+        throw new SubscriptionProviderError("budget_unenforceable");
+      }
       if (provider.kind === "deepseek" && provider.authMode === "api_key") {
         const secretStore = dependencies.secretStore ?? dependencies.getSecretStore?.();
         if (!secretStore) throw new ProviderConfigurationError();

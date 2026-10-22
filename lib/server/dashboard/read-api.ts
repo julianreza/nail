@@ -1,6 +1,7 @@
 import { type Database, openDatabase, withTransaction } from "../db/database";
 import { createRepositories } from "../db/repositories";
 import { createAgentService } from "../agents/agent-service";
+import { createCodexDirectRepository } from "../providers/codex-direct/repository";
 
 interface AuthGuard {
   protectedResource(request: Request): Promise<Response>;
@@ -73,9 +74,15 @@ export function createDashboardReadHandlers(
       return read(request, async (_database, repositories) => (await repositories.approvals.list()));
     },
     providers(request: Request): Promise<Response> {
-      return read(request, async (_database, repositories) =>
-        Promise.all((await repositories.providers.list()).map(async (provider) => {
-          const binding = (await repositories.accountBindings.getByProviderId(provider.id));
+      return read(request, async (database, repositories) => {
+        const directRepository = createCodexDirectRepository(database);
+        return Promise.all((await repositories.providers.list()).map(async (provider) => {
+          const direct = provider.authMode === "subscription_oauth"
+            ? await directRepository.readAccount(provider.id)
+            : null;
+          const binding = provider.authMode === "subscription_cli"
+            ? await repositories.accountBindings.getByProviderId(provider.id)
+            : null;
           return {
             id: provider.id,
             name: provider.name,
@@ -85,12 +92,16 @@ export function createDashboardReadHandlers(
             authMode: provider.authMode,
             capabilities: provider.capabilities,
             createdAt: provider.createdAt,
-            connection: binding
-              ? { state: binding.state, reason: binding.reason, checkedAt: binding.checkedAt }
-              : null,
+            connection: direct
+              ? { state: direct.state, reason: null, checkedAt: direct.catalogCheckedAt }
+              : binding
+                ? { state: binding.state, reason: binding.reason, checkedAt: binding.checkedAt }
+                : provider.authMode === "subscription_oauth"
+                  ? { state: "not_configured", reason: null, checkedAt: null }
+                  : null,
           };
-        })),
-      );
+        }));
+      });
     },
   };
 }

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SubscriptionConnector } from "../../../lib/domain/subscription-provider";
 import { openDatabase, createRepositories } from "../../../lib/server/db/database";
 import { EncryptedSecretStore } from "../../../lib/server/providers/secret-store";
@@ -79,6 +79,40 @@ describe("provider registry text dispatch", () => {
       ]);
     } finally {
       (await database.close());
+    }
+  });
+
+  it("blocks direct Codex subscription before touching connector or secret storage", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "nail-provider-registry-"));
+    directories.push(directory);
+    const { database, repositories } = await createDatabase(directory);
+    const provider = await repositories.providers.create({
+      id: "codex-direct",
+      name: "Codex Direct",
+      kind: "codex",
+      status: "unavailable",
+      model: "gpt-codex-model",
+      authMode: "subscription_oauth",
+      secretReference: null,
+      capabilities: [],
+    });
+    const connector = subscriptionConnector();
+    const complete = vi.spyOn(connector, "complete");
+    const getSecretStore = vi.fn();
+    const registry = createProviderRegistry({ database, connector, getSecretStore });
+    try {
+      await expect(registry.completeText({
+        providerId: provider.id,
+        runId: "run",
+        prompt: "Make a plan",
+        maxOutputTokens: 20,
+        signal: new AbortController().signal,
+      })).rejects.toMatchObject({ code: "budget_unenforceable" });
+      expect(complete).not.toHaveBeenCalled();
+      expect(getSecretStore).not.toHaveBeenCalled();
+      expect(await repositories.usageRecords.list()).toEqual([]);
+    } finally {
+      await database.close();
     }
   });
 

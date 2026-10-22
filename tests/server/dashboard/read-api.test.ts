@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createAuthHandlers, hashOwnerPassword } from "../../../lib/server/auth/auth-service";
 import { openDatabase, createRepositories } from "../../../lib/server/db/database";
 import { createDashboardReadHandlers } from "../../../lib/server/dashboard/read-api";
+import { createCodexDirectRepository } from "../../../lib/server/providers/codex-direct/repository";
+import { sealCodexSecret } from "../../../lib/server/providers/codex-direct/crypto";
 
 const temporaryDirectories: string[] = [];
 
@@ -186,5 +188,34 @@ describe("authenticated dashboard read APIs", () => {
     expect(codex).not.toHaveProperty("revision");
     expect(records[0]).not.toHaveProperty("secretReference");
     expect(JSON.stringify(records)).not.toContain("vault://private/provider-key");
+  });
+
+  it("projects direct Codex OAuth safely without exposing ciphertext or CLI binding data", async () => {
+    const path = createDatabaseIdentity();
+    const database = await openDatabase(path);
+    const account = await createCodexDirectRepository(database).ensureAccount();
+    const key = Buffer.alloc(32, 11);
+    const ciphertext = sealCodexSecret({ accessToken: "private-access-token-fixture" }, key,
+      `codex-direct-account:${account.providerId}:2`);
+    await database.prepare(
+      `UPDATE codex_direct_accounts SET state='connected', revision=2, credential_ciphertext=$1,
+        catalog_json='[]'::jsonb, catalog_checked_at=$2 WHERE provider_id=$3`,
+    ).run(ciphertext, "2026-10-22T00:00:00.000Z", account.providerId);
+    await database.prepare("UPDATE providers SET model=$1, status='unavailable' WHERE id=$2").run("listed-model", account.providerId);
+    await database.close();
+
+    const { handlers, request } = await createAuthenticatedHandlers(path);
+    const response = await handlers.providers(request("/api/providers"));
+    const records = await response.json() as Array<Record<string, unknown>>;
+    const direct = records.find((record) => record.id === account.providerId);
+    expect(direct).toMatchObject({
+      kind: "codex", authMode: "subscription_oauth", status: "unavailable", model: "listed-model", capabilities: [],
+      connection: { state: "connected", reason: null, checkedAt: "2026-10-22T00:00:00.000Z" },
+    });
+    expect(JSON.stringify(direct)).not.toContain(ciphertext);
+    expect(JSON.stringify(direct)).not.toContain("private-access-token-fixture");
+    expect(direct).not.toHaveProperty("accountId");
+    expect(direct).not.toHaveProperty("bindingId");
+    expect(direct).not.toHaveProperty("sessionHash");
   });
 });
