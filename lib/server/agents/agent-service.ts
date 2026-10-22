@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { AGENT_SKILLS } from "../../domain/agent-skills";
 import { parseAgentInput, type AgentInput, type AgentOptions, type AgentSummary, type AgentView } from "../../domain/agent";
 import { createRepositories, withTransaction, type Database } from "../db/database";
+import { getProviderModels } from "./provider-models";
 
 export type AgentServiceErrorCode =
   | "invalid_input"
@@ -100,14 +101,13 @@ export function createAgentService(database: Database) {
         repositories.projects.list(),
       ]);
       return {
-        providers: providers
-          .map((provider) => ({
+        providers: (await Promise.all(providers.map(async (provider) => ({
             id: provider.id,
             name: provider.name,
             kind: provider.kind,
             status: provider.status,
-            models: provider.model ? [{ id: provider.model, label: provider.model }] : [],
-          }))
+            models: await getProviderModels(database, provider),
+          }))))
           .sort(compareByName),
         projects: projects
           .map(({ id, name }) => ({ id, name }))

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAgentService, AgentServiceError } from "../../../lib/server/agents/agent-service";
 import { createRepositories, openDatabase, type Database } from "../../../lib/server/db/database";
+import { createCodexDirectRepository } from "../../../lib/server/providers/codex-direct/repository";
 
 const databases: Database[] = [];
 const validInput = {
@@ -18,6 +19,20 @@ async function setup() {
   const database = await openDatabase(`agent-service-${randomUUID()}`);
   databases.push(database);
   return { database, repositories: createRepositories(database), service: createAgentService(database) };
+}
+
+async function directFixture(database: Database) {
+  const repository = createCodexDirectRepository(database);
+  const account = await repository.ensureAccount();
+  const models = [
+    { id: "catalog-one", label: "Catalog One" },
+    { id: "catalog-two", label: "Catalog Two" },
+  ];
+  await database.prepare(`UPDATE codex_direct_accounts
+    SET state='connected', credential_ciphertext=$1, catalog_json=$2::jsonb,
+        catalog_checked_at=CURRENT_TIMESTAMP WHERE provider_id=$3`)
+    .run("fixture-ciphertext-must-not-leak", JSON.stringify(models), account.providerId);
+  return { providerId: account.providerId, models };
 }
 
 afterEach(async () => {
@@ -60,6 +75,15 @@ describe("agent configuration service", () => {
       .rejects.toEqual(expect.objectContaining({ code: "model_not_available", status: 400 }));
     await expect(service.create({ ...validInput, providerId: "p1", model: null }))
       .rejects.toEqual(expect.objectContaining({ code: "invalid_input", status: 400 }));
+  });
+
+  it("lists the full connected direct catalog without a provider-selected model", async () => {
+    const { database, service } = await setup();
+    const { providerId, models } = await directFixture(database);
+    const options = await service.options();
+    expect(options.providers.find((provider) => provider.id === providerId)?.models).toEqual(models);
+    expect(JSON.stringify(options)).not.toContain("fixture-ciphertext-must-not-leak");
+    expect(JSON.stringify(options)).not.toContain("credentialCiphertext");
   });
 
   it("returns safe sorted provider/project options and curated skill metadata", async () => {
