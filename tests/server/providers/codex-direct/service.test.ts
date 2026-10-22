@@ -67,9 +67,9 @@ describe("Codex direct owner login lifecycle", () => {
     expect(account).toMatchObject({ providerId: started.providerId, state: "connected", inferenceReady: false, model: null });
     const catalog = await service.refreshModels(account.revision, new AbortController().signal);
     expect(catalog.models).toEqual([{ id: "fixture-model", label: "Fixture model" }]);
-    const selected = await service.selectModel("fixture-model", catalog.account.revision);
+    const selected = await service.selectModel("fixture-model", catalog.account.revision, new AbortController().signal);
     expect(selected).toMatchObject({ providerId: started.providerId, state: "connected", inferenceReady: false, model: "fixture-model" });
-    await expect(service.selectModel("not-in-catalog", selected.revision)).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(service.selectModel("not-in-catalog", selected.revision, new AbortController().signal)).rejects.toMatchObject({ code: "invalid_request" });
     const provider = await (await import("../../../../lib/server/db/repositories")).createRepositories(database).providers.getById(started.providerId);
     expect(provider).toMatchObject({ status: "unavailable", authMode: "subscription_oauth", capabilities: [], model: "fixture-model", secretReference: null });
     const privateRow = await repository.readAccount(started.providerId);
