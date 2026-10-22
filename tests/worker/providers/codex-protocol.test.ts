@@ -1,6 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { SubscriptionProviderError } from "../../../lib/server/providers/subscription-errors";
-import { parseCodexCompletion } from "../../../worker/providers/codex-protocol";
+import { parseCodexCompletion, parseCodexLoginStatus } from "../../../worker/providers/codex-protocol";
+
+it("recognizes only explicit stderr ChatGPT status", () => {
+  expect(parseCodexLoginStatus({ stdout: "", stderr: "Logged in using ChatGPT\n", exitCode: 0 }))
+    .toEqual({ state: "connected", reason: null });
+  expect(parseCodexLoginStatus({ stdout: "", stderr: "Not logged in\n", exitCode: 1 }))
+    .toEqual({ state: "needs_login", reason: "needs_login" });
+  expect(parseCodexLoginStatus({ stdout: "", stderr: "API key configured - masked-fixture\nAPI billing notice\n", exitCode: 0 }))
+    .toEqual({ state: "unsupported", reason: "wrong_auth_mode" });
+});
+
+it.each([
+  { stdout: "Logged in using ChatGPT\n", stderr: "", exitCode: 0 },
+  { stdout: "unexpected", stderr: "Logged in using ChatGPT\n", exitCode: 0 },
+  { stdout: "", stderr: "Logged in using ChatGPT\nextra", exitCode: 0 },
+  { stdout: "", stderr: "Logged in using ChatGPT\n", exitCode: 1 },
+  { stdout: "", stderr: "Not logged in\n", exitCode: 0 },
+  { stdout: "", stderr: "Logged in using workload identity\n", exitCode: 0 },
+  { stdout: "", stderr: "Logged in using access token\n", exitCode: 0 },
+  { stdout: "", stderr: "", exitCode: 0 },
+])("rejects ambiguous or wrong-mode status %#", (result) => {
+  expect(parseCodexLoginStatus(result)).toEqual({ state: "unsupported", reason: "auth_status_unverified" });
+});
 
 const success = [
   { type: "thread.started", thread_id: "test-thread" },

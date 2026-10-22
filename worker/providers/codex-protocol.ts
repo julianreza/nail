@@ -1,5 +1,28 @@
 import type { SubscriptionCompletion } from "../../lib/domain/subscription-provider";
 import { SubscriptionProviderError } from "../../lib/server/providers/subscription-errors";
+import type { ProviderProcessResult } from "./process-runner";
+
+export interface CodexLoginDiagnostic {
+  state: "connected" | "needs_login" | "unsupported";
+  reason: "needs_login" | "wrong_auth_mode" | "auth_status_unverified" | null;
+}
+
+export function parseCodexLoginStatus(
+  result: Pick<ProviderProcessResult, "stdout" | "stderr" | "exitCode">,
+): CodexLoginDiagnostic {
+  const unknown: CodexLoginDiagnostic = { state: "unsupported", reason: "auth_status_unverified" };
+  if (result.stdout !== "") return unknown;
+  if (result.exitCode === 0 && /^Logged in using ChatGPT(?:\r?\n)?$/.test(result.stderr)) {
+    return { state: "connected", reason: null };
+  }
+  if (result.exitCode === 1 && /^Not logged in(?:\r?\n)?$/.test(result.stderr)) {
+    return { state: "needs_login", reason: "needs_login" };
+  }
+  if (result.exitCode === 0 && /^API key configured - [^\r\n]+(?:\r?\n|$)/.test(result.stderr)) {
+    return { state: "unsupported", reason: "wrong_auth_mode" };
+  }
+  return unknown;
+}
 
 const MAX_JSONL_BYTES = 1024 * 1024;
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
