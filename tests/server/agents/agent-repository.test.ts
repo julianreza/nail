@@ -78,7 +78,17 @@ it("backfills existing agent configuration and restricts deleting referenced age
       INSERT INTO schema_migrations (version, name)
       SELECT version, 'legacy' FROM generate_series(1, 11) AS version;
       CREATE TABLE projects (id TEXT PRIMARY KEY);
-      CREATE TABLE providers (id TEXT PRIMARY KEY, model TEXT);
+      CREATE TABLE providers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('not_configured','needs_login','ready','rate_limited','unavailable')),
+        model TEXT,
+        auth_mode TEXT NOT NULL CHECK (auth_mode IN ('api_key','subscription_cli','none')),
+        secret_reference TEXT,
+        capabilities_json TEXT NOT NULL DEFAULT '[]',
+        kind TEXT CHECK (kind IS NULL OR kind IN ('deepseek','antigravity','codex','claude')),
+        binding_generation INTEGER NOT NULL DEFAULT 0
+      );
       CREATE TABLE agents (
         id TEXT PRIMARY KEY,
         project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
@@ -92,7 +102,8 @@ it("backfills existing agent configuration and restricts deleting referenced age
           REFERENCES agents(id) ON DELETE SET NULL
       );
       INSERT INTO projects (id) VALUES ('legacy-project');
-      INSERT INTO providers (id, model) VALUES ('legacy-provider', 'old-configured-model');
+      INSERT INTO providers (id, name, status, model, auth_mode, secret_reference, capabilities_json, kind, binding_generation)
+      VALUES ('legacy-provider', 'Legacy Provider', 'not_configured', 'old-configured-model', 'none', NULL, '[]', NULL, 0);
       INSERT INTO agents (id, project_id, provider_id, name, role, created_at)
       VALUES ('legacy-agent', 'legacy-project', 'legacy-provider', 'Legacy PM', 'pm', '2024-01-02T03:04:05.000Z');
       INSERT INTO tasks (id, owner_agent_id) VALUES ('historical-task', 'legacy-agent');

@@ -6,8 +6,16 @@ import CodexDirectProviderCard from "../../app/codex-direct-provider-card";
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-const baseAccount = { enabled: true, providerId: null, state: "not_configured", model: null, revision: 0, inferenceReady: false };
-const connectedAccount = { enabled: true, providerId: "provider-direct", state: "connected", model: null, revision: 2, inferenceReady: false };
+interface AccountFixture {
+  enabled: boolean;
+  providerId: string | null;
+  state: "not_configured" | "connected";
+  model: string | null;
+  revision: number;
+  inferenceReady: false;
+}
+const baseAccount: AccountFixture = { enabled: true, providerId: null, state: "not_configured", model: null, revision: 0, inferenceReady: false };
+const connectedAccount: AccountFixture = { enabled: true, providerId: "provider-direct", state: "connected", model: null, revision: 2, inferenceReady: false };
 
 function installFetch(handler: (url: string, init?: RequestInit) => Promise<Response>) {
   const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => handler(String(input), init));
@@ -73,7 +81,7 @@ it("polls no sooner than the interval and never overlaps requests", async () => 
 });
 
 it("reads account and model back after login, selects only listed models, and keeps inference disabled", async () => {
-  let account: { enabled: boolean; providerId: string | null; state: string; model: string | null; revision: number; inferenceReady: false } = baseAccount;
+  let account: AccountFixture = baseAccount;
   const calls: Array<[string, string]> = [];
   installFetch(async (url, init) => {
     const method = init?.method ?? "GET";

@@ -45,6 +45,7 @@ describe("PostgreSQL persistence", () => {
         { version: 10 },
         { version: 11 },
         { version: 12 },
+        { version: 13 },
       ]);
       expect(
         (await db
@@ -52,7 +53,7 @@ describe("PostgreSQL persistence", () => {
             "SELECT tablename FROM pg_tables WHERE schemaname = current_schema() AND tablename <> 'schema_migrations' ORDER BY tablename",
           )
           .all()),
-      ).toHaveLength(19);
+      ).toHaveLength(21);
     } finally {
       (await db.close());
     }
