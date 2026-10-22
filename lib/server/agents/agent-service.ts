@@ -79,7 +79,8 @@ export function createAgentService(database: Database) {
     if (input.providerId === null) return;
     const provider = await repositories.providers.getById(input.providerId);
     if (!provider) throw new AgentServiceError("invalid_reference");
-    if (!provider.model || provider.model !== input.model) {
+    const models = await getProviderModels(database, provider);
+    if (!models.some((model) => model.id === input.model)) {
       throw new AgentServiceError("model_not_available");
     }
   }
@@ -122,6 +123,10 @@ export function createAgentService(database: Database) {
         repositories.providers.list(),
       ]);
       const providerById = new Map(providers.map((provider) => [provider.id, provider]));
+      const availableByProvider = new Map(await Promise.all(providers.map(async (provider) => [
+        provider.id,
+        new Set((await getProviderModels(database, provider)).map((model) => model.id)),
+      ] as const)));
       return agents.map((agent) => {
         const provider = agent.providerId ? providerById.get(agent.providerId) : undefined;
         const unbound = agent.providerId === null && agent.model === null;
@@ -134,7 +139,7 @@ export function createAgentService(database: Database) {
           providerName: provider?.name ?? null,
           providerStatus: provider?.status ?? null,
           model: agent.model,
-          modelMatchesProvider: unbound || Boolean(provider?.model && provider.model === agent.model),
+          modelMatchesProvider: unbound || Boolean(agent.model && availableByProvider.get(agent.providerId ?? "")?.has(agent.model)),
           skillIds: [...agent.skillIds],
         };
       });

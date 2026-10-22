@@ -86,6 +86,65 @@ describe("agent configuration service", () => {
     expect(JSON.stringify(options)).not.toContain("credentialCiphertext");
   });
 
+  it("accepts two independent agent model choices from one direct account", async () => {
+    const { database, service } = await setup();
+    const { providerId } = await directFixture(database);
+    const first = await service.create({ ...validInput, name: "First", providerId, model: "catalog-one" });
+    const second = await service.create({ ...validInput, name: "Second", providerId, model: "catalog-two" });
+    expect(await service.get(first.id)).toMatchObject({ model: "catalog-one" });
+    expect(await service.get(second.id)).toMatchObject({ model: "catalog-two" });
+    expect(await database.prepare("SELECT model FROM providers WHERE id=$1").get(providerId)).toEqual({ model: null });
+
+    const updated = await service.update(second.id, 1, {
+      ...validInput, name: "Second", providerId, model: "catalog-one",
+    });
+    expect(updated).toMatchObject({ model: "catalog-one", revision: 2 });
+  });
+
+  it("rejects an invented direct model even if the legacy provider model matches", async () => {
+    const { database, service } = await setup();
+    const { providerId } = await directFixture(database);
+    await database.prepare("UPDATE providers SET model=$1 WHERE id=$2").run("invented-model", providerId);
+    await expect(service.create({ ...validInput, providerId, model: "invented-model" }))
+      .rejects.toMatchObject({ code: "model_not_available", status: 400 });
+  });
+
+  it("summarizes catalog membership without rewriting stale agents", async () => {
+    const { database, service } = await setup();
+    const { providerId } = await directFixture(database);
+    const agent = await service.create({ ...validInput, providerId, model: "catalog-two" });
+    expect((await service.summaries()).find((item) => item.id === agent.id))
+      .toMatchObject({ model: "catalog-two", modelMatchesProvider: true });
+
+    await database.prepare("UPDATE codex_direct_accounts SET catalog_json=$1::jsonb WHERE provider_id=$2")
+      .run(JSON.stringify([{ id: "catalog-one", label: "Catalog One" }]), providerId);
+    expect((await service.summaries()).find((item) => item.id === agent.id))
+      .toMatchObject({ model: "catalog-two", modelMatchesProvider: false });
+    expect(await service.get(agent.id)).toMatchObject({ model: "catalog-two" });
+  });
+
+  it("does not offer or accept a disconnected account catalog", async () => {
+    const { database, service } = await setup();
+    const { providerId, models } = await directFixture(database);
+    await database.prepare(`UPDATE codex_direct_accounts
+      SET state='needs_login', credential_ciphertext=NULL WHERE provider_id=$1`).run(providerId);
+    expect((await service.options()).providers.find((provider) => provider.id === providerId)?.models).toEqual([]);
+    expect(models).toHaveLength(2);
+    await expect(service.create({ ...validInput, providerId, model: "catalog-one" }))
+      .rejects.toMatchObject({ code: "model_not_available", status: 400 });
+  });
+
+  it("does not offer models for a direct OAuth provider without an account row", async () => {
+    const { database, repositories, service } = await setup();
+    await repositories.providers.create({
+      id: "orphan-direct", name: "Direct Codex", kind: "codex", authMode: "subscription_oauth",
+      status: "unavailable", model: "legacy-model", capabilities: [],
+    });
+    expect((await service.options()).providers.find((provider) => provider.id === "orphan-direct")?.models).toEqual([]);
+    await expect(service.create({ ...validInput, providerId: "orphan-direct", model: "legacy-model" }))
+      .rejects.toMatchObject({ code: "model_not_available", status: 400 });
+  });
+
   it("returns safe sorted provider/project options and curated skill metadata", async () => {
     const { service, repositories } = await setup();
     await repositories.projects.create({ id: "project-b", name: "Beta" });
