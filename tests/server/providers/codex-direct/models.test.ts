@@ -58,6 +58,18 @@ describe("Codex model discovery and selection", () => {
     await expect(service.selectModel("invented-model", account!.revision, new AbortController().signal)).rejects.toMatchObject({ code: "invalid_request" });
   });
 
+  it("persists a production-shaped listed model without contacting the vendor", async () => {
+    const { service, account, fetcher, database, repository } = await setupAccount([
+      { id: "gpt-6.1-sol", label: "GPT-6.1-Sol" },
+      { id: "gpt-6-luna", label: "GPT-6-Luna" },
+    ]);
+    const selected = await service.selectModel("gpt-6.1-sol", account!.revision, new AbortController().signal);
+    expect(selected).toMatchObject({ model: "gpt-6.1-sol", revision: account!.revision + 1, inferenceReady: false });
+    expect(await repository.readAccount(account!.providerId)).toMatchObject({ model: "gpt-6.1-sol", revision: selected.revision });
+    expect(await createRepositories(database).providers.getById(account!.providerId)).toMatchObject({ model: "gpt-6.1-sol", status: "unavailable" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("refreshes a stale catalog before saving an exact listed model", async () => {
     const { service, account, fetcher, database, repository } = await setupAccount(catalogFixture(), null);
     await database.prepare("UPDATE codex_direct_accounts SET catalog_checked_at=$1 WHERE provider_id=$2")

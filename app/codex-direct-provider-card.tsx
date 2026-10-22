@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { requestCodexJson } from "../lib/client/codex-direct-request";
 
 interface DirectAccountView {
   enabled: boolean;
@@ -20,17 +21,6 @@ interface LoginState {
   expiresAt: string;
 }
 
-function errorMessage(value: unknown): string | null {
-  return typeof value === "object" && value !== null && "error" in value && typeof value.error === "string"
-    ? value.error
-    : null;
-}
-
-async function readResponse(response: Response): Promise<unknown> {
-  const body: unknown = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(errorMessage(body) ?? "Permintaan Codex tidak dapat diproses.");
-  return body;
-}
 
 function isAccount(value: unknown): value is DirectAccountView {
   return typeof value === "object" && value !== null && "enabled" in value && typeof value.enabled === "boolean" &&
@@ -58,8 +48,7 @@ export default function CodexDirectProviderCard() {
 
   const loadAccount = useCallback(async (signal?: AbortSignal) => {
     try {
-      const response = await fetch("/api/providers/codex-direct/account", { cache: "no-store", signal });
-      const value = await readResponse(response);
+      const value = await requestCodexJson("/api/providers/codex-direct/account", { signal });
       if (!isAccount(value)) throw new Error("Status akun Codex tidak valid.");
       setAccount(value);
       setSelectedModel(value.model ?? "");
@@ -82,11 +71,10 @@ export default function CodexDirectProviderCard() {
 
   const loadModels = useCallback(async (expectedRevision: number, signal?: AbortSignal) => {
     try {
-      const response = await fetch("/api/providers/codex-direct/models", {
+      const result = await requestCodexJson("/api/providers/codex-direct/models", {
         method: "POST", headers: { "content-type": "application/json" }, cache: "no-store", signal,
         body: JSON.stringify({ expectedRevision }),
       });
-      const result: unknown = await readResponse(response);
       if (typeof result !== "object" || result === null || !("models" in result) || !isModels(result.models) ||
         !("account" in result) || !isAccount(result.account)) throw new Error("Daftar model Codex tidak valid.");
       setModels(result.models);
@@ -105,11 +93,10 @@ export default function CodexDirectProviderCard() {
     if (pollInFlight.current || signal.aborted) return;
     pollInFlight.current = true;
     try {
-      const response = await fetch("/api/providers/codex-direct/login/poll", {
+      const result = await requestCodexJson("/api/providers/codex-direct/login/poll", {
         method: "POST", headers: { "content-type": "application/json" }, cache: "no-store", signal,
         body: JSON.stringify({ loginId: current.loginId }),
       });
-      const result: unknown = await readResponse(response);
       if (typeof result !== "object" || result === null || !("state" in result)) throw new Error("Respons login Codex tidak valid.");
       if (result.state === "pending") {
         const retryAfterSeconds = "retryAfterSeconds" in result && typeof result.retryAfterSeconds === "number"
@@ -171,10 +158,9 @@ export default function CodexDirectProviderCard() {
     setError("");
     setMessage("");
     try {
-      const response = await fetch("/api/providers/codex-direct/login/start", {
+      const result = await requestCodexJson("/api/providers/codex-direct/login/start", {
         method: "POST", headers: { "content-type": "application/json" }, cache: "no-store", body: "{}",
       });
-      const result: unknown = await readResponse(response);
       if (typeof result !== "object" || result === null ||
         !("loginId" in result) || typeof result.loginId !== "string" ||
         !("verificationUri" in result) || result.verificationUri !== "https://auth.openai.com/codex/device" ||
@@ -202,15 +188,24 @@ export default function CodexDirectProviderCard() {
     setLoading(true);
     activePoll.current?.abort();
     try {
-      const response = await fetch("/api/providers/codex-direct/login/cancel", {
+      await requestCodexJson("/api/providers/codex-direct/login/cancel", {
         method: "POST", headers: { "content-type": "application/json" }, cache: "no-store",
         body: JSON.stringify({ loginId: login.loginId }),
       });
-      await readResponse(response);
       setLogin(null);
       setMessage("Login dibatalkan.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Login Codex tidak dapat dibatalkan.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function reloadStatus() {
+    if (loading) return;
+    setLoading(true);
+    try {
+      await loadAccount();
     } finally {
       setLoading(false);
     }
@@ -232,11 +227,10 @@ export default function CodexDirectProviderCard() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/providers/codex-direct/model", {
+      const result = await requestCodexJson("/api/providers/codex-direct/model", {
         method: "POST", headers: { "content-type": "application/json" }, cache: "no-store",
         body: JSON.stringify({ model: selectedModel, expectedRevision: account.revision }),
       });
-      const result: unknown = await readResponse(response);
       if (!isAccount(result)) throw new Error("Status model Codex tidak valid.");
       const readback = await loadAccount();
       if (!readback || readback.providerId !== result.providerId || readback.model !== selectedModel) {
@@ -256,11 +250,10 @@ export default function CodexDirectProviderCard() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/providers/codex-direct/account", {
+      const result = await requestCodexJson("/api/providers/codex-direct/account", {
         method: "DELETE", headers: { "content-type": "application/json" }, cache: "no-store",
         body: JSON.stringify({ expectedRevision: account.revision }),
       });
-      const result: unknown = await readResponse(response);
       if (!isAccount(result)) throw new Error("Status akun Codex tidak valid.");
       setAccount(result);
       setModels([]);
@@ -323,8 +316,14 @@ export default function CodexDirectProviderCard() {
           {loading ? "Memulai…" : "Hubungkan ChatGPT"}
         </button>
       )}
+      {loading ? <p className="inline-status" role="status">Memproses permintaan Codex… Maksimal 30 detik per permintaan.</p> : null}
       {message ? <p aria-live="polite" className="inline-status" role="status">{message}</p> : null}
-      {error ? <p className="inline-status" role="alert">{error}</p> : null}
+      {error ? (
+        <div>
+          <p className="inline-status" role="alert">{error}</p>
+          <button className="button-secondary" disabled={loading} onClick={() => void reloadStatus()} type="button">Muat ulang status</button>
+        </div>
+      ) : null}
     </article>
   );
 }

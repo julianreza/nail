@@ -127,6 +127,121 @@ it("reads account and model back after login, selects only listed models, and ke
   expect(JSON.stringify(calls)).not.toContain("auth.json");
 });
 
+it("saves a listed model with ordinary browser selection and reads the same model back", async () => {
+  let account: AccountFixture = { ...connectedAccount };
+  const calls: Array<{ url: string; body: unknown }> = [];
+  installFetch(async (url, init) => {
+    calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
+    if (url === "/api/providers/codex-direct/account") return Response.json(account);
+    if (url === "/api/providers/codex-direct/models") {
+      account = { ...account, revision: 3 };
+      return Response.json({ models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol" }], checkedAt: new Date().toISOString(), account });
+    }
+    if (url === "/api/providers/codex-direct/model") {
+      const body = JSON.parse(String(init?.body));
+      expect(body).toEqual({ model: "gpt-6.1-sol", expectedRevision: 3 });
+      account = { ...account, model: body.model, revision: 4 };
+      return Response.json(account);
+    }
+    throw new Error("Unexpected request");
+  });
+  const user = userEvent.setup();
+  render(<CodexDirectProviderCard />);
+  await screen.findByText("Akun terhubung; penggunaan agent belum diaktifkan.");
+  await user.click(screen.getByRole("button", { name: "Perbarui daftar model" }));
+  await screen.findByRole("option", { name: "GPT-6.1-Sol" });
+  await user.selectOptions(screen.getByRole("combobox", { name: "Model Codex" }), "gpt-6.1-sol");
+  expect((screen.getByRole("button", { name: "Simpan model" }) as HTMLButtonElement).disabled).toBe(false);
+  await user.click(screen.getByRole("button", { name: "Simpan model" }));
+  await screen.findByText("Model tersimpan: gpt-6.1-sol");
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(calls.slice(-2).map((item) => item.url)).toEqual(["/api/providers/codex-direct/model", "/api/providers/codex-direct/account"]);
+});
+
+it("releases stuck loading after a stalled model refresh and preserves the chosen model", async () => {
+  let catalogReads = 0;
+  let stalledSignal: AbortSignal | null | undefined;
+  installFetch(async (url, init) => {
+    if (url === "/api/providers/codex-direct/account") return Response.json(connectedAccount);
+    if (url === "/api/providers/codex-direct/models") {
+      catalogReads += 1;
+      if (catalogReads === 1) return Response.json({ models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol" }], account: { ...connectedAccount, revision: 3 } });
+      stalledSignal = init?.signal;
+      return new Promise<Response>(() => {});
+    }
+    throw new Error("Unexpected request");
+  });
+  const user = userEvent.setup();
+  render(<CodexDirectProviderCard />);
+  await screen.findByText("Akun terhubung; penggunaan agent belum diaktifkan.");
+  await user.click(screen.getByRole("button", { name: "Perbarui daftar model" }));
+  await screen.findByRole("option", { name: "GPT-6.1-Sol" });
+  await user.selectOptions(screen.getByRole("combobox", { name: "Model Codex" }), "gpt-6.1-sol");
+  vi.useFakeTimers();
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Perbarui daftar model" })); });
+  expect((screen.getByRole("button", { name: "Simpan model" }) as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(screen.getByRole("alert").textContent).toContain("Permintaan Codex melewati batas waktu");
+  expect(stalledSignal?.aborted).toBe(true);
+  expect((screen.getByRole("combobox", { name: "Model Codex" }) as HTMLSelectElement).value).toBe("gpt-6.1-sol");
+  expect((screen.getByRole("button", { name: "Simpan model" }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole("button", { name: "Perbarui daftar model" }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it("releases loading if a save response body stalls and does not show a false save success", async () => {
+  installFetch(async (url) => {
+    if (url === "/api/providers/codex-direct/account") return Response.json(connectedAccount);
+    if (url === "/api/providers/codex-direct/models") return Response.json({ models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol" }], account: { ...connectedAccount, revision: 3 } });
+    if (url === "/api/providers/codex-direct/model") return new Response(new ReadableStream<Uint8Array>({ start() {} }), { status: 200 });
+    throw new Error("Unexpected request");
+  });
+  const user = userEvent.setup();
+  render(<CodexDirectProviderCard />);
+  await screen.findByText("Akun terhubung; penggunaan agent belum diaktifkan.");
+  await user.click(screen.getByRole("button", { name: "Perbarui daftar model" }));
+  await screen.findByRole("option", { name: "GPT-6.1-Sol" });
+  await user.selectOptions(screen.getByRole("combobox", { name: "Model Codex" }), "gpt-6.1-sol");
+  vi.useFakeTimers();
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Simpan model" })); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(screen.getByRole("alert").textContent).toContain("Permintaan Codex melewati batas waktu");
+  expect(screen.queryByText("Model tersimpan: gpt-6.1-sol")).toBeNull();
+  expect((screen.getByRole("button", { name: "Simpan model" }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it("checks a timed-out save through explicit status readback without resubmitting it", async () => {
+  let stored: AccountFixture = { ...connectedAccount };
+  let saves = 0;
+  installFetch(async (url, init) => {
+    if (url === "/api/providers/codex-direct/account") return Response.json(stored);
+    if (url === "/api/providers/codex-direct/models") {
+      stored = { ...stored, revision: 3 };
+      return Response.json({ models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol" }], account: stored });
+    }
+    if (url === "/api/providers/codex-direct/model") {
+      saves += 1;
+      expect(JSON.parse(String(init?.body)).model).toBe("gpt-6.1-sol");
+      stored = { ...stored, model: "gpt-6.1-sol", revision: 4 };
+      return new Promise<Response>(() => {});
+    }
+    throw new Error("Unexpected request");
+  });
+  const user = userEvent.setup();
+  render(<CodexDirectProviderCard />);
+  await screen.findByText("Akun terhubung; penggunaan agent belum diaktifkan.");
+  await user.click(screen.getByRole("button", { name: "Perbarui daftar model" }));
+  await screen.findByRole("option", { name: "GPT-6.1-Sol" });
+  await user.selectOptions(screen.getByRole("combobox", { name: "Model Codex" }), "gpt-6.1-sol");
+  vi.useFakeTimers();
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Simpan model" })); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(screen.getByRole("alert")).toBeTruthy();
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Muat ulang status" })); });
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByText("Model saat ini: gpt-6.1-sol")).toBeTruthy();
+  expect(saves).toBe(1);
+});
+
 it("aborts active polling and clears timer on unmount", async () => {
   let pollSignal: AbortSignal | undefined;
   const fetcher = installFetch(async (url, init) => {
