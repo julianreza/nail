@@ -172,7 +172,6 @@ export function createCodexDirectService(dependencies: CodexDirectServiceDepende
           expiresAt: expiresAt.toISOString(),
         };
       } catch (error) {
-        await releaseAfterFailure(account.providerId, account.revision, lease.leaseId);
         if (isCodexDirectError(error)) throw error;
         throw new CodexDirectError("unavailable");
       }

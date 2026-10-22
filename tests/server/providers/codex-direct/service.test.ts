@@ -117,6 +117,14 @@ describe("Codex direct owner login lifecycle", () => {
     expect(await repository.readAccount(started.providerId)).toMatchObject({ state: "not_configured", leaseId: null, credentialCiphertext: null });
   });
 
+  it("does not immediately retry a device-code start whose upstream outcome is uncertain", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new Error("temporary upstream failure"));
+    const { service } = await setup(fetcher);
+    await expect(service.start(accountSession, new AbortController().signal)).rejects.toMatchObject({ code: "unavailable" });
+    await expect(service.start(accountSession, new AbortController().signal)).rejects.toMatchObject({ code: "busy" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("does not allow a delayed exchange to reconnect after disconnect", async () => {
     let finishExchange!: (response: Response) => void;
     let markExchangeStarted!: () => void;
