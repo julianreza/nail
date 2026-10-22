@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createAuthHandlers,
   createAuthState,
+  getOwnerSessionBindingHash,
   hashOwnerPassword,
   type AuthConfig,
 } from "../../../lib/server/auth/auth-service";
@@ -58,6 +59,19 @@ describe("owner authentication", () => {
         new Request("https://nail.example/", { headers: { cookie } }),
       )).status,
     ).toBe(200);
+  });
+
+  it("binds private state to an HMAC of the Nail session cookie without returning it", () => {
+    const secret = Buffer.alloc(32, 19).toString("base64url");
+    const cookieValue = "signed.owner.session.fixture";
+    const request = (cookie: string) => new Request("https://nail.example/private", { headers: { cookie: `nail_session=${cookie}` } });
+    const hash = getOwnerSessionBindingHash(request(cookieValue), secret);
+    expect(hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(hash).not.toContain(cookieValue);
+    expect(getOwnerSessionBindingHash(request(cookieValue), secret)).toBe(hash);
+    expect(getOwnerSessionBindingHash(request("different.session.fixture"), secret)).not.toBe(hash);
+    expect(getOwnerSessionBindingHash(new Request("https://nail.example/private"), secret)).toBeNull();
+    expect(getOwnerSessionBindingHash(request(cookieValue), "invalid-secret")).toBeNull();
   });
 
   it("sets a protected, expiring session cookie for valid owner credentials", async () => {

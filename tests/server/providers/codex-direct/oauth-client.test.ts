@@ -24,6 +24,7 @@ describe("Codex device OAuth client", () => {
     expect(await oauth.poll(grant, new AbortController().signal)).toEqual({ state: "pending", slowDown: false });
     const code = await oauth.poll(grant, new AbortController().signal);
     expect(code).toEqual({ state: "code", code: "auth_code", verifier: "pkce_verifier" });
+    if (code.state !== "code") throw new Error("Expected authorization-code result");
     const tokens = await oauth.exchange(code.code, code.verifier, new AbortController().signal);
     expect(tokens).toMatchObject({ accountId: "fixture_account", refreshToken: "fixture_refresh_do_not_log", expiresAt: NOW + 3_600_000 });
     expect(await oauth.refresh(tokens, new AbortController().signal)).toEqual(tokens);

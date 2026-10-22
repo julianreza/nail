@@ -201,6 +201,14 @@ export function isSameOriginRequest(request: Request, appOrigin: string): boolea
   return sameOrigin(request, appOrigin);
 }
 
+/** Bind private provider state to the authenticated Nail session without persisting its cookie. */
+export function getOwnerSessionBindingHash(request: Request, sessionSecret: string): string | null {
+  const secret = parseSecret(sessionSecret);
+  const token = readCookie(request, SESSION_COOKIE);
+  if (!secret || !token || token.length > 1024) return null;
+  return createHmac("sha256", secret).update(token, "utf8").digest("hex");
+}
+
 function json(body: object, status: number, headers?: HeadersInit): Response {
   const responseHeaders = new Headers(headers);
   responseHeaders.set("content-type", "application/json; charset=utf-8");
