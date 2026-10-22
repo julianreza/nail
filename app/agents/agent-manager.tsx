@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AgentInput, AgentOptions, AgentView } from "../../lib/domain/agent";
 import { parseAgentInput } from "../../lib/domain/agent";
 import AgentCard from "./agent-card";
@@ -72,6 +72,30 @@ export default function AgentManager() {
   const [pending, setPending] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const addButtonRef = useRef<HTMLButtonElement | null>(null);
+  const focusAfterClose = useRef<HTMLElement | null>(null);
+
+  function restoreFocus() {
+    const target = focusAfterClose.current;
+    window.setTimeout(() => {
+      if (target?.isConnected) target.focus();
+      else addButtonRef.current?.focus();
+    }, 0);
+  }
+
+  function closeEditor() {
+    setEditorOpen(false);
+    setEditorInitial(undefined);
+    setMutationError(null);
+    setRevisionConflict(false);
+    restoreFocus();
+  }
+
+  function closeDeleteConfirmation() {
+    setDeleteCandidate(null);
+    setDeleteError(null);
+    restoreFocus();
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -173,6 +197,7 @@ export default function AgentManager() {
       setEditorInitial(undefined);
       setNotice(editing ? "Perubahan agent tersimpan." : "Agent tersimpan.");
       window.dispatchEvent(new Event("agent-list-refresh"));
+      restoreFocus();
     } catch (error) {
       setMutationError(error instanceof Error ? error.message : "Agent tidak dapat disimpan.");
     } finally {
@@ -228,6 +253,7 @@ export default function AgentManager() {
       setDeleteCandidate(null);
       setNotice("Agent dihapus.");
       window.dispatchEvent(new Event("agent-list-refresh"));
+      restoreFocus();
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : "Agent tidak dapat dihapus.");
     } finally {
@@ -246,9 +272,11 @@ export default function AgentManager() {
           {agents === null ? "Memuat jumlah…" : `${new Intl.NumberFormat("id-ID").format(agents.length)} agent tersimpan`}
         </span>
         <button
+          ref={addButtonRef}
           className="button-primary"
           disabled={options === null || optionsLoading || pending}
-          onClick={() => {
+          onClick={(event) => {
+            focusAfterClose.current = event.currentTarget;
             setEditorInitial(undefined);
             setEditorOpen(true);
             setMutationError(null);
@@ -266,7 +294,7 @@ export default function AgentManager() {
           <p>Yakin ingin menghapus agent <strong>{deleteCandidate.name}</strong>? Tindakan ini tidak dapat dibatalkan.</p>
           {deleteError ? <p className="agent-form-error" role="alert">{deleteError}</p> : null}
           <div className="agent-form-actions">
-            <button className="button-secondary" disabled={pending} onClick={() => { setDeleteCandidate(null); setDeleteError(null); }} type="button">Batalkan penghapusan</button>
+            <button className="button-secondary" disabled={pending} onClick={closeDeleteConfirmation} type="button">Batalkan penghapusan</button>
             <button className="button-danger" disabled={pending} onClick={() => void deleteAgent(deleteCandidate)} type="button">{pending ? "Menghapus…" : "Hapus agent"}</button>
           </div>
         </section>
@@ -296,7 +324,7 @@ export default function AgentManager() {
             key={editorInitial ? `${editorInitial.id}:${editorInitial.revision}` : "new-agent"}
             error={revisionConflict ? null : mutationError}
             initial={editorInitial}
-            onCancel={() => { setEditorOpen(false); setEditorInitial(undefined); setMutationError(null); setRevisionConflict(false); }}
+            onCancel={closeEditor}
             onSubmit={saveAgent}
             options={options}
             pending={pending}
@@ -323,8 +351,15 @@ export default function AgentManager() {
               <li key={agent.id}>
                 <AgentCard
                   agent={agent}
-                  onEdit={(selected) => { void openEditor(selected); }}
-                  onRequestDelete={(selected) => { setDeleteCandidate(selected); setDeleteError(null); }}
+                  onEdit={(selected, trigger) => {
+                    focusAfterClose.current = trigger;
+                    void openEditor(selected);
+                  }}
+                  onRequestDelete={(selected, trigger) => {
+                    focusAfterClose.current = trigger;
+                    setDeleteCandidate(selected);
+                    setDeleteError(null);
+                  }}
                   options={options}
                   pending={pending}
                 />

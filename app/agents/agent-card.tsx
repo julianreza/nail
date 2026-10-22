@@ -5,8 +5,8 @@ import type { AgentOptions, AgentView } from "../../lib/domain/agent";
 export default function AgentCard({ agent, options, onEdit, onRequestDelete, pending }: {
   agent: AgentView;
   options: AgentOptions | null;
-  onEdit(agent: AgentView): void;
-  onRequestDelete(agent: AgentView): void;
+  onEdit(agent: AgentView, trigger: HTMLButtonElement): void;
+  onRequestDelete(agent: AgentView, trigger: HTMLButtonElement): void;
   pending: boolean;
 }) {
   const provider = options?.providers.find((item) => item.id === agent.providerId);
@@ -47,10 +47,10 @@ export default function AgentCard({ agent, options, onEdit, onRequestDelete, pen
         ) : null}
       </div>
       <div className="agent-card-actions">
-        <button className="button-secondary" disabled={pending} onClick={() => onEdit(agent)} type="button" aria-label={`Ubah ${agent.name}`}>
+        <button className="button-secondary" disabled={pending} onClick={(event) => onEdit(agent, event.currentTarget)} type="button" aria-label={`Ubah ${agent.name}`}>
           Ubah
         </button>
-        <button className="button-danger" disabled={pending} onClick={() => onRequestDelete(agent)} type="button" aria-label={`Hapus ${agent.name}`}>
+        <button className="button-danger" disabled={pending} onClick={(event) => onRequestDelete(agent, event.currentTarget)} type="button" aria-label={`Hapus ${agent.name}`}>
           Hapus
         </button>
       </div>

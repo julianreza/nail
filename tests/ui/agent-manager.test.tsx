@@ -227,6 +227,35 @@ it("requires exact-name delete confirmation and verifies absence before removing
   ]);
 });
 
+it("restores focus to the opener after cancelling create, edit and delete", async () => {
+  installFetch(async (url, init) => {
+    const method = init?.method ?? "GET";
+    if (url === "/api/agents/options") return Response.json(options);
+    if (url === "/api/agents" && method === "GET") return Response.json([savedAgent]);
+    if (url === "/api/agents/agent-1" && method === "GET") return Response.json({ agent: savedAgent });
+    throw new Error(`Unexpected request ${method} ${url}`);
+  });
+  const user = userEvent.setup();
+  render(<AgentManager />);
+  await screen.findByText("Saved Planner");
+
+  const add = screen.getByRole("button", { name: "Tambah agent" });
+  await user.click(add);
+  await user.click(screen.getByRole("button", { name: "Batal" }));
+  expect(document.activeElement).toBe(add);
+
+  const edit = screen.getByRole("button", { name: "Ubah Saved Planner" });
+  await user.click(edit);
+  await screen.findByRole("button", { name: "Simpan perubahan" });
+  await user.click(screen.getByRole("button", { name: "Batal" }));
+  expect(document.activeElement).toBe(edit);
+
+  const remove = screen.getByRole("button", { name: "Hapus Saved Planner" });
+  await user.click(remove);
+  await user.click(screen.getByRole("button", { name: "Batalkan penghapusan" }));
+  expect(document.activeElement).toBe(remove);
+});
+
 it("keeps an agent row when deletion is blocked by its task history", async () => {
   installFetch(async (url, init) => {
     const method = init?.method ?? "GET";
