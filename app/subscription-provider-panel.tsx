@@ -29,7 +29,7 @@ const PROVIDERS: Array<{
     kind: "codex",
     title: "Codex Subscription",
     description: "Binding akun ChatGPT untuk Codex CLI, terpisah dari penggunaan API key OpenAI.",
-    loginNote: "Pada host connector, login melalui Codex CLI resmi (`codex login`) di home akun khusus. Jangan salin auth.json ke repo atau chat.",
+    loginNote: "Di terminal host connector, gunakan home akun khusus (CODEX_HOME=HOME), lalu jalankan codex login dan codex login status dengan penyimpanan file seperti di docs/providers/codex-cli-oauth.md. Login memakai akun ChatGPT, bukan API key. Jangan salin token atau auth.json ke repo/chat. Status connected bukan ready; inference masih diblokir sampai isolasi dan batas penggunaan terverifikasi.",
   },
   {
     kind: "claude",

@@ -4,6 +4,14 @@ import { describe, expect, it } from "vitest";
 import SubscriptionProviderPanel from "../../app/subscription-provider-panel";
 
 describe("subscription provider panel", () => {
+  it("explains dedicated Codex OAuth and does not promise inference readiness", () => {
+    const markup = renderToStaticMarkup(createElement(SubscriptionProviderPanel));
+    expect(markup).toContain("CODEX_HOME=HOME");
+    expect(markup).toContain("codex login status");
+    expect(markup).toContain("connected bukan ready");
+    expect(markup).toContain("docs/providers/codex-cli-oauth.md");
+  });
+
   it("shows the three account providers, never asks for tokens, and labels incomplete availability", () => {
     const markup = renderToStaticMarkup(createElement(SubscriptionProviderPanel));
     expect(markup).toContain("Antigravity");
