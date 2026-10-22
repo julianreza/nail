@@ -81,6 +81,11 @@ const ACCOUNT_SELECT = `SELECT a.provider_id AS "providerId", a.state, a.revisio
   FROM codex_direct_accounts a JOIN providers p ON p.id = a.provider_id
   WHERE p.auth_mode = 'subscription_oauth' AND p.kind = 'codex'`;
 
+const LOGIN_SELECT = `SELECT id, provider_id AS "providerId", owner_session_hash AS "ownerSessionHash",
+  account_revision AS "accountRevision", state, grant_ciphertext AS "grantCiphertext",
+  expires_at AS "expiresAt", next_poll_at AS "nextPollAt", interval_seconds AS "intervalSeconds",
+  lease_id AS "leaseId", lease_until AS "leaseUntil" FROM codex_direct_logins`;
+
 export function createCodexDirectRepository(database: Database) {
   async function readAccount(providerId?: string): Promise<CodexDirectAccountRecord | null> {
     const row = providerId
@@ -128,6 +133,7 @@ export function createCodexDirectRepository(database: Database) {
       kind: CodexDirectLeaseKind,
       now: Date,
       leaseMs = 30_000,
+      ownerSessionHash?: string,
     ): Promise<{ leaseId: string; leaseUntil: string } | null> {
       if (!Number.isSafeInteger(revision) || revision < 1 || !Number.isSafeInteger(leaseMs) || leaseMs < 1 || leaseMs > 45_000) {
         throw new Error("Direct Codex lease input is invalid");
@@ -138,6 +144,13 @@ export function createCodexDirectRepository(database: Database) {
       return withTransaction(database, async () => {
         const current = await readAccount(providerId);
         if (!current || current.revision !== revision) return null;
+        if (kind === "login" && ownerSessionHash) {
+          const recent = await database.prepare(
+            `SELECT id FROM codex_direct_logins WHERE provider_id = $1 AND owner_session_hash = $2
+             AND created_at > $3 LIMIT 1`,
+          ).get(providerId, ownerSessionHash, new Date(now.getTime() - 30_000).toISOString());
+          if (recent) return null;
+        }
         if (current.leaseId && current.leaseUntil && Date.parse(current.leaseUntil) > now.getTime()) return null;
         if (current.leaseId && current.leaseKind === "refresh") {
           await database.prepare(
@@ -218,7 +231,12 @@ export function createCodexDirectRepository(database: Database) {
       return withTransaction(database, async () => {
         const account = await readAccount(input.providerId);
         if (!account || account.revision !== input.accountRevision || account.state === "connected" ||
-          (account.leaseId && account.leaseUntil && Date.parse(account.leaseUntil) > input.now.getTime())) return false;
+          account.leaseId !== input.id || account.leaseKind !== "login") return false;
+        const recent = await database.prepare(
+          `SELECT id FROM codex_direct_logins WHERE provider_id = $1 AND owner_session_hash = $2
+           AND created_at > $3 LIMIT 1`,
+        ).get(input.providerId, input.ownerSessionHash, new Date(input.now.getTime() - 30_000).toISOString());
+        if (recent) return false;
         await database.prepare(
           `UPDATE codex_direct_logins SET state = 'expired', grant_ciphertext = NULL, lease_id = NULL, lease_until = NULL
            WHERE provider_id = $1 AND state = 'pending' AND expires_at <= $2`,
@@ -233,17 +251,49 @@ export function createCodexDirectRepository(database: Database) {
           input.expiresAt.toISOString(), input.nextPollAt.toISOString(), input.intervalSeconds);
         if (inserted.changes !== 1) return false;
         const reserved = await database.prepare(
-          `UPDATE codex_direct_accounts SET lease_id = $1, lease_kind = 'login', lease_until = $2,
-            updated_at = CURRENT_TIMESTAMP
-           WHERE provider_id = $3 AND revision = $4 AND state <> 'connected'
-             AND (lease_id IS NULL OR lease_until <= $5)`,
-        ).run(input.id, input.expiresAt.toISOString(), input.providerId, input.accountRevision, input.now.toISOString());
+          `UPDATE codex_direct_accounts SET lease_until = $1, updated_at = CURRENT_TIMESTAMP
+           WHERE provider_id = $2 AND revision = $3 AND lease_id = $4 AND lease_kind = 'login'
+             AND lease_until > $5`,
+        ).run(input.expiresAt.toISOString(), input.providerId, input.accountRevision, input.id, input.now.toISOString());
         if (reserved.changes !== 1) throw new Error("Direct Codex account reservation failed");
         await database.prepare(
           "DELETE FROM codex_direct_logins WHERE provider_id = $1 AND state <> 'pending' AND created_at < $2",
         ).run(input.providerId, new Date(input.now.getTime() - 24 * 60 * 60 * 1000).toISOString());
         return true;
       });
+    },
+
+    async getLoginForOwner(id: string, ownerSessionHash: string): Promise<CodexDirectLoginRecord | null> {
+      const row = await database.prepare(
+        `${LOGIN_SELECT} WHERE id = $1 AND owner_session_hash = $2`,
+      ).get(id, ownerSessionHash);
+      return loginFromRow(row);
+    },
+
+    async expireLogin(id: string, ownerSessionHash: string, now: Date): Promise<boolean> {
+      return withTransaction(database, async () => {
+        const row = await database.prepare(
+          `UPDATE codex_direct_logins SET state = 'expired', grant_ciphertext = NULL,
+            lease_id = NULL, lease_until = NULL
+           WHERE id = $1 AND owner_session_hash = $2 AND state = 'pending' AND expires_at <= $3
+           RETURNING provider_id AS "providerId", account_revision AS "accountRevision"`,
+        ).get(id, ownerSessionHash, now.toISOString());
+        if (!row) return false;
+        await database.prepare(
+          `UPDATE codex_direct_accounts SET lease_id = NULL, lease_kind = NULL, lease_until = NULL,
+            updated_at = CURRENT_TIMESTAMP
+           WHERE provider_id = $1 AND revision = $2 AND lease_id = $3 AND lease_kind = 'login'`,
+        ).run(String(row.providerId), Number(row.accountRevision), id);
+        return true;
+      });
+    },
+
+    async releaseAccountLease(providerId: string, revision: number, leaseId: string): Promise<boolean> {
+      return (await database.prepare(
+        `UPDATE codex_direct_accounts SET lease_id = NULL, lease_kind = NULL, lease_until = NULL,
+          updated_at = CURRENT_TIMESTAMP
+         WHERE provider_id = $1 AND revision = $2 AND lease_id = $3`,
+      ).run(providerId, revision, leaseId)).changes === 1;
     },
 
     async claimPoll(id: string, ownerSessionHash: string, now: Date): Promise<(CodexDirectLoginRecord & { pollLeaseId: string }) | null> {
@@ -255,7 +305,9 @@ export function createCodexDirectRepository(database: Database) {
            WHERE id = $3 AND owner_session_hash = $4 AND state = 'pending'
              AND expires_at > $5 AND next_poll_at <= $5
              AND (lease_id IS NULL OR lease_until <= $5)
-             AND account_revision = (SELECT revision FROM codex_direct_accounts WHERE provider_id = codex_direct_logins.provider_id)
+             AND EXISTS (SELECT 1 FROM codex_direct_accounts a WHERE a.provider_id = codex_direct_logins.provider_id
+               AND a.revision = codex_direct_logins.account_revision AND a.lease_id = codex_direct_logins.id
+               AND a.lease_kind = 'login' AND a.lease_until > $5)
            RETURNING id, provider_id AS "providerId", owner_session_hash AS "ownerSessionHash",
              account_revision AS "accountRevision", state, grant_ciphertext AS "grantCiphertext",
              expires_at AS "expiresAt", next_poll_at AS "nextPollAt", interval_seconds AS "intervalSeconds",
@@ -286,6 +338,9 @@ export function createCodexDirectRepository(database: Database) {
             next_poll_at = COALESCE($3, next_poll_at), interval_seconds = $4,
             lease_id = NULL, lease_until = NULL
            WHERE id = $5 AND state = 'pending' AND lease_id = $6 AND expires_at > $7
+             AND EXISTS (SELECT 1 FROM codex_direct_accounts a WHERE a.provider_id = codex_direct_logins.provider_id
+               AND a.revision = codex_direct_logins.account_revision AND a.lease_id = codex_direct_logins.id
+               AND a.lease_kind = 'login')
            RETURNING provider_id AS "providerId", account_revision AS "accountRevision"`,
         ).get(input.state, input.grantCiphertext, input.nextPollAt?.toISOString() ?? null, input.intervalSeconds,
           input.id, input.pollLeaseId, input.now.toISOString());
