@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,6 +12,7 @@ const checkedAt = "2026-10-20T00:00:00.000Z";
 function binding(kind: "codex" | "antigravity" | "claude", installed = false) {
   const directory = mkdtempSync(join(tmpdir(), "nail-subscription-adapter-"));
   directories.push(directory);
+  mkdirSync(join(directory, "home"), { mode: 0o700 });
   const executable = join(directory, kind === "antigravity" ? "agy" : kind);
   if (installed) {
     writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
