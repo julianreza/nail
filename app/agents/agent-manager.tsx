@@ -69,6 +69,7 @@ export default function AgentManager() {
   const [deleteCandidate, setDeleteCandidate] = useState<AgentView | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [revisionConflict, setRevisionConflict] = useState(false);
+  const [unconfirmedCreated, setUnconfirmedCreated] = useState<{ id: string; revision: number } | null>(null);
   const [pending, setPending] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -158,6 +159,41 @@ export default function AgentManager() {
     }
   }
 
+  async function readBackAgentList(id: string, revision: number): Promise<AgentView[]> {
+    const savedResponse = await fetch(`/api/agents/${encodeURIComponent(id)}`, { cache: "no-store" });
+    const savedBody = await readJson(savedResponse);
+    if (!savedResponse.ok || !isRecord(savedBody) || !isAgentView(savedBody.agent) || savedBody.agent.id !== id || savedBody.agent.revision !== revision) {
+      throw new Error("Agent mungkin tersimpan, tetapi belum dapat diverifikasi. Verifikasi ulang sebelum mencoba lagi.");
+    }
+    const listResponse = await fetch("/api/agents", { cache: "no-store" });
+    const listBody = await readJson(listResponse);
+    if (!listResponse.ok || !isAgentList(listBody) || !listBody.some((agent) => agent.id === id && agent.revision === revision)) {
+      throw new Error("Agent tersimpan, tetapi daftar belum dapat diverifikasi. Verifikasi ulang sebelum mencoba lagi.");
+    }
+    return listBody;
+  }
+
+  async function verifyUnconfirmedCreate() {
+    const unconfirmed = unconfirmedCreated;
+    if (!unconfirmed) return;
+    setPending(true);
+    setMutationError(null);
+    try {
+      const list = await readBackAgentList(unconfirmed.id, unconfirmed.revision);
+      setAgents(list);
+      setUnconfirmedCreated(null);
+      setEditorOpen(false);
+      setEditorInitial(undefined);
+      setNotice("Agent tersimpan.");
+      window.dispatchEvent(new Event("agent-list-refresh"));
+      restoreFocus();
+    } catch (error) {
+      setMutationError(error instanceof Error ? error.message : "Agent tersimpan tetapi belum dapat diverifikasi.");
+    } finally {
+      setPending(false);
+    }
+  }
+
   async function saveAgent(input: AgentInput) {
     const editing = editorInitial;
     setPending(true);
@@ -179,20 +215,11 @@ export default function AgentManager() {
       if (!isRecord(body) || !isAgentView(body.agent)) throw new Error("Respons agent tidak valid.");
       const id = editing?.id ?? body.agent.id;
       if (body.agent.id !== id) throw new Error("ID agent tidak cocok dengan perubahan yang diminta.");
-
-      const savedResponse = await fetch(`/api/agents/${encodeURIComponent(id)}`, { cache: "no-store" });
-      const savedBody = await readJson(savedResponse);
-      if (!savedResponse.ok || !isRecord(savedBody) || !isAgentView(savedBody.agent) || savedBody.agent.id !== id) {
-        throw new Error("Agent mungkin tersimpan, tetapi belum dapat diverifikasi. Muat ulang sebelum mencoba lagi.");
-      }
-      const verifiedAgent = savedBody.agent;
-      const listResponse = await fetch("/api/agents", { cache: "no-store" });
-      const listBody = await readJson(listResponse);
-      if (!listResponse.ok || !isAgentList(listBody) || !listBody.some((agent) => agent.id === id && agent.revision === verifiedAgent.revision)) {
-        throw new Error("Agent tersimpan, tetapi daftar belum dapat diverifikasi. Muat ulang sebelum mencoba lagi.");
-      }
+      if (!editing) setUnconfirmedCreated({ id, revision: body.agent.revision });
+      const listBody = await readBackAgentList(id, body.agent.revision);
 
       setAgents(listBody);
+      setUnconfirmedCreated(null);
       setEditorOpen(false);
       setEditorInitial(undefined);
       setNotice(editing ? "Perubahan agent tersimpan." : "Agent tersimpan.");
@@ -274,7 +301,7 @@ export default function AgentManager() {
         <button
           ref={addButtonRef}
           className="button-primary"
-          disabled={options === null || optionsLoading || pending}
+          disabled={options === null || optionsLoading || pending || unconfirmedCreated !== null}
           onClick={(event) => {
             focusAfterClose.current = event.currentTarget;
             setEditorInitial(undefined);
@@ -288,6 +315,15 @@ export default function AgentManager() {
       </div>
 
       {notice ? <p className="agent-manager-notice" role="status">{notice}</p> : null}
+      {unconfirmedCreated ? (
+        <div className="state-card state-card-error" role="alert">
+          <p>Agent mungkin sudah tersimpan. Verifikasi data tersimpan sebelum mencoba membuat agent lagi.</p>
+          {mutationError ? <p>{mutationError}</p> : null}
+          <button className="button-secondary" disabled={pending} onClick={() => void verifyUnconfirmedCreate()} type="button">
+            {pending ? "Memverifikasi…" : "Verifikasi agent tersimpan"}
+          </button>
+        </div>
+      ) : null}
       {deleteCandidate ? (
         <section aria-label={`Konfirmasi hapus ${deleteCandidate.name}`} className="agent-delete-confirmation" role="alertdialog">
           <h3>Konfirmasi hapus</h3>

@@ -256,6 +256,43 @@ it("restores focus to the opener after cancelling create, edit and delete", asyn
   expect(document.activeElement).toBe(remove);
 });
 
+it("retries exact readback after a successful POST without sending a duplicate create", async () => {
+  const created = { ...savedAgent, id: "agent-readback", name: "Readback PM" };
+  let detailReads = 0;
+  let createCalls = 0;
+  let listReads = 0;
+  installFetch(async (url, init) => {
+    const method = init?.method ?? "GET";
+    if (url === "/api/agents/options") return Response.json(options);
+    if (url === "/api/agents" && method === "GET") {
+      listReads += 1;
+      return Response.json(listReads === 1 ? [] : [created]);
+    }
+    if (url === "/api/agents" && method === "POST") {
+      createCalls += 1;
+      return Response.json({ agent: created }, { status: 201 });
+    }
+    if (url === "/api/agents/agent-readback" && method === "GET") {
+      detailReads += 1;
+      return detailReads === 1
+        ? Response.json({ error: "temporary readback failure" }, { status: 503 })
+        : Response.json({ agent: created });
+    }
+    throw new Error(`Unexpected request ${method} ${url}`);
+  });
+  const user = userEvent.setup();
+  render(<AgentManager />);
+  await screen.findByText("Belum ada agent tersimpan.");
+  await user.click(screen.getByRole("button", { name: "Tambah agent" }));
+  await user.type(screen.getByLabelText("Nama"), "Readback PM");
+  await user.click(screen.getByRole("button", { name: "Simpan agent" }));
+  await screen.findByRole("button", { name: "Verifikasi agent tersimpan" });
+  expect((screen.getByLabelText("Nama") as HTMLInputElement).value).toBe("Readback PM");
+  await user.click(screen.getByRole("button", { name: "Verifikasi agent tersimpan" }));
+  expect(await screen.findByText("Readback PM")).toBeTruthy();
+  expect(createCalls).toBe(1);
+});
+
 it("keeps an agent row when deletion is blocked by its task history", async () => {
   installFetch(async (url, init) => {
     const method = init?.method ?? "GET";
