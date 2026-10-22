@@ -27,6 +27,12 @@ function renderForm(props: Partial<ComponentProps<typeof AgentForm>> = {}) {
   return { onSubmit, onCancel };
 }
 
+it("defaults a new agent to the PM role without exposing the custom role input", () => {
+  renderForm();
+  expect((screen.getByLabelText("Peran") as HTMLSelectElement).value).toBe("pm");
+  expect(screen.queryByLabelText("Slug peran khusus")).toBeNull();
+});
+
 it("saves an unbound configured agent without invented provider data", async () => {
   const submit = vi.fn();
   const user = userEvent.setup();

@@ -40,9 +40,10 @@ export default function AgentForm({ options, initial, pending, error, onSubmit, 
     skillIds: [...initial.skillIds],
     instructions: initial.instructions,
   } : { ...EMPTY_AGENT });
-  const [roleChoice, setRoleChoice] = useState<string>(() =>
-    ROLE_OPTIONS.some((role) => role.id === initial?.role) ? initial!.role : "custom",
-  );
+  const [roleChoice, setRoleChoice] = useState<string>(() => {
+    if (!initial) return "pm";
+    return ROLE_OPTIONS.some((role) => role.id === initial.role) ? initial.role : "custom";
+  });
   const [customRole, setCustomRole] = useState(() =>
     initial && !ROLE_OPTIONS.some((role) => role.id === initial.role) ? initial.role : "",
   );
