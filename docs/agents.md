@@ -10,13 +10,13 @@ Each agent has:
 - **Role** — lowercase slug, such as `pm`, `engineer`, `qa`, `frontend` or `backend`; a custom slug is allowed.
 - **Project scope** — a saved project or no specific project.
 - **Provider** — any saved provider, including one that is currently unavailable, or **Belum ditautkan**.
-- **Model** — the model already configured on the selected provider. Nail currently stores one configured model per provider; the model picker is not a vendor model catalogue.
+- **Model** — a model selected for this agent from the selected provider's available models. Each agent stores its own model. Direct Codex uses the connected account's selectable model catalog, so different agents can choose different listed models; DeepSeek and CLI providers continue to expose their configured model.
 - **Skills** — up to ten curated instruction presets (planning, implementation, testing, review).
 - **Additional instructions** — owner-authored text, up to 8,000 Unicode characters.
 
 The skill presets are guidance text only. **Selecting a skill does not grant tools, install a plugin, or enable command execution.** Provider status is shown truthfully: an unavailable provider may be saved as configuration, but the agent cannot call it. For Codex-specific setup/status, see [Codex CLI OAuth](providers/codex-cli-oauth.md).
 
-Changing a provider clears the previous model selection. The page chooses the provider's configured model when it is available; if not, the owner must choose an available option. A provider model change after an agent was saved is reported as a mismatch; Nail does not silently rewrite the saved agent model.
+Changing a provider clears the previous model selection. A provider with one available model selects it automatically; when multiple models are available, the owner chooses one explicitly. A model that disappears from the provider's current options is reported as stale and blocks saving until the owner chooses a current model; Nail does not silently rewrite saved agent configuration.
 
 ## Edit conflicts and deletion
 

@@ -10,7 +10,7 @@ This does **not** establish that OpenAI permits a third-party service to reuse a
 - A successful sign-in and model catalog produce connection state `connected`, but provider status stays `unavailable`, capabilities remain empty, and `inferenceReady` is always `false`.
 - The production provider registry explicitly rejects `subscription_oauth` with `budget_unenforceable`. Do not interpret the private smoke probe, byte caps, rate limits, or synthetic tests as proof that a strict output-token ceiling is enforced. PM/engineer/QA agent execution stays blocked.
 - Device-code sign-in can be disabled by the account/workspace. If it is unavailable, do not switch to API-key billing, paste a token, scrape browser cookies, use a personal CLI cache, or spoof a Codex client identity.
-- Models are projected from the account's current catalog. Nail does not ship guessed model names or expose vendor instructions from catalog entries. Selection is not a live inference test.
+- Models are projected from the account's current selectable catalog. Nail does not ship guessed model names or expose vendor instructions from catalog entries. Owners choose a listed model when configuring each agent; selection is configuration only, not a live inference test.
 
 ## Required review and server configuration
 
@@ -35,8 +35,8 @@ The current production Compose configuration is not changed by this feature. Do 
 1. Sign in to Nail as the owner and open **Providers → Codex Subscription — tanpa CLI**.
 2. Click **Hubungkan ChatGPT**. Nail starts a device-code flow and displays a one-time code plus a link to the fixed official page `https://auth.openai.com/codex/device`.
 3. Open that page yourself and enter the code only if you initiated this request in Nail. Never post the code, screen capture, token, account ID, or `auth.json` in Discord or a shared log.
-4. Nail makes short, bounded poll requests. When login completes, it reads the account back, then requests the model catalog. Choose an entry from the returned dropdown and save it; Nail checks the exact selected model against the current catalog and reads back the saved account/model.
-5. The card reports **Akun terhubung; penggunaan agent belum diaktifkan**. This is expected: the direct account is not inference-ready.
+4. Nail reads the connected account back and refreshes its model catalog. Open **Agents → Add/Edit Agent**, choose the Codex provider and one of the listed models, then save the agent. Each agent stores its own model choice; the Provider card does not select or save a provider-wide model.
+5. The Provider card reports **Akun terhubung; penggunaan agent belum diaktifkan**. This is expected: the direct account is not inference-ready.
 
 The browser does not send OAuth tokens to Nail. Nail encrypts the access/refresh token envelope before PostgreSQL persistence; the plaintext token and account routing ID are not included in HTTP projections. The one-time device grant is also encrypted while pending and bound to the initiating Nail session. Polling is owner-authenticated, same-origin, no-store, interval-bounded, and expires after at most 15 minutes. No browser localStorage/sessionStorage or background OAuth polling is used.
 
@@ -48,13 +48,14 @@ The owner UI uses these same-origin endpoints:
 - `POST /api/providers/codex-direct/login/start`
 - `POST /api/providers/codex-direct/login/poll`
 - `POST /api/providers/codex-direct/login/cancel`
-- `POST /api/providers/codex-direct/models`
-- `POST /api/providers/codex-direct/model`
+- `POST /api/providers/codex-direct/models` — refresh the current account catalog.
 - `DELETE /api/providers/codex-direct/account`
+
+The legacy `POST /api/providers/codex-direct/model` endpoint remains for compatibility, but the current Provider card does not call it. Model choices for agents are validated against the refreshed catalog and saved on each Agent record.
 
 Mutations require a valid Nail owner session, exact `APP_ORIGIN`, JSON content type, strict body schemas, and bounded request size. They return `Cache-Control: no-store`; the code-bearing start response also sets `Referrer-Policy: no-referrer`. All upstream hosts/paths are fixed in code, TLS verification remains on, redirects are rejected, and vendor errors are reduced to fixed safe diagnostics.
 
-The model dropdown uses the authenticated Codex catalog; it does not call the public OpenAI API model-list endpoint. Catalog errors or unsupported response schemas fail closed. Do not add a fallback model list or return upstream instructions.
+The Agent model selector uses the connected account's refreshed Codex catalog; it does not call the public OpenAI API model-list endpoint. Catalog errors or unsupported response schemas fail closed. Do not add a fallback model list or return upstream instructions.
 
 ## Storage, disconnect, and backups
 
