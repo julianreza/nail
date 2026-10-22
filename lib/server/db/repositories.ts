@@ -289,6 +289,39 @@ export function createRepositories(database: Database) {
       return (await database.prepare("SELECT * FROM agents ORDER BY created_at ASC, id ASC").all())
         .map(mapAgentRow);
     },
+    async updateConfiguration(input: {
+      id: string;
+      revision: number;
+      projectId: string | null;
+      providerId: string | null;
+      model: string | null;
+      name: string;
+      role: string;
+      instructions: string;
+      skillIds: string[];
+    }): Promise<boolean> {
+      return (await database.prepare(
+        `UPDATE agents SET project_id = $1, provider_id = $2, model = $3,
+           name = $4, role = $5, instructions = $6, skill_ids_json = $7,
+           revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $8 AND revision = $9`,
+      ).run(
+        input.projectId,
+        input.providerId,
+        input.model,
+        input.name,
+        input.role,
+        input.instructions,
+        JSON.stringify(input.skillIds),
+        input.id,
+        input.revision,
+      )).changes === 1;
+    },
+    async deleteIfRevision(id: string, revision: number): Promise<boolean> {
+      return (await database.prepare(
+        "DELETE FROM agents WHERE id = $1 AND revision = $2",
+      ).run(id, revision)).changes === 1;
+    },
   };
 
   const providers = {

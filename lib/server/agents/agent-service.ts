@@ -41,6 +41,29 @@ function parseInput(value: unknown): AgentInput {
   }
 }
 
+function assertRevision(revision: number): void {
+  if (!Number.isSafeInteger(revision) || revision < 1) throw new AgentServiceError("invalid_input");
+}
+
+async function hasNonterminalRun(
+  repositories: ReturnType<typeof createRepositories>,
+  projectIds: readonly (string | null)[],
+): Promise<boolean> {
+  const runs = await repositories.runs.list();
+  const globalScope = projectIds.includes(null);
+  const affectedProjects = new Set(projectIds.filter((id): id is string => id !== null));
+  return runs.some((run) =>
+    !["done", "failed", "cancelled"].includes(run.state) &&
+    (globalScope || affectedProjects.has(run.projectId)),
+  );
+}
+
+function isAgentTaskReferenceError(error: unknown): boolean {
+  return typeof error === "object" && error !== null &&
+    "code" in error && error.code === "23503" &&
+    "constraint" in error && error.constraint === "tasks_owner_agent_id_fkey";
+}
+
 function compareByName(first: { name: string; id: string }, second: { name: string; id: string }): number {
   return first.name.localeCompare(second.name) || first.id.localeCompare(second.id);
 }
@@ -126,12 +149,44 @@ export function createAgentService(database: Database) {
       });
     },
 
-    async update(_id: string, _revision: number, _value: AgentInput): Promise<AgentView> {
-      throw new AgentServiceError("not_found");
+    async update(id: string, revision: number, value: AgentInput): Promise<AgentView> {
+      assertRevision(revision);
+      const input = parseInput(value);
+      return await withTransaction(database, async () => {
+        const current = await repositories.agents.getById(id);
+        if (!current) throw new AgentServiceError("not_found");
+        if (current.revision !== revision) throw new AgentServiceError("revision_conflict");
+        await validateReferences(input);
+        if (await hasNonterminalRun(repositories, [current.projectId, input.projectId])) {
+          throw new AgentServiceError("agent_in_use");
+        }
+        const updated = await repositories.agents.updateConfiguration({ id, revision, ...input });
+        if (!updated) throw new AgentServiceError("revision_conflict");
+        return (await repositories.agents.getById(id))!;
+      });
     },
 
-    async delete(_id: string, _revision: number): Promise<void> {
-      throw new AgentServiceError("not_found");
+    async delete(id: string, revision: number): Promise<void> {
+      assertRevision(revision);
+      try {
+        await withTransaction(database, async () => {
+          const current = await repositories.agents.getById(id);
+          if (!current) throw new AgentServiceError("not_found");
+          if (current.revision !== revision) throw new AgentServiceError("revision_conflict");
+          if (await hasNonterminalRun(repositories, [current.projectId])) {
+            throw new AgentServiceError("agent_in_use");
+          }
+          if ((await repositories.tasks.list()).some((task) => task.ownerAgentId === id)) {
+            throw new AgentServiceError("agent_referenced");
+          }
+          if (!(await repositories.agents.deleteIfRevision(id, revision))) {
+            throw new AgentServiceError("revision_conflict");
+          }
+        });
+      } catch (error) {
+        if (isAgentTaskReferenceError(error)) throw new AgentServiceError("agent_referenced");
+        throw error;
+      }
     },
   };
 }

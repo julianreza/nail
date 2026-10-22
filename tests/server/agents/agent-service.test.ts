@@ -101,4 +101,60 @@ describe("agent configuration service", () => {
     expect(JSON.stringify(summaries)).not.toContain("secretReference");
     await expect(service.get("missing-agent")).rejects.toBeInstanceOf(AgentServiceError);
   });
+
+  it("updates with revision compare-and-swap and rejects a stale concurrent edit", async () => {
+    const { service } = await setup();
+    const created = await service.create(validInput);
+    const edited = { ...validInput, name: "PM Updated", skillIds: ["planning", "review"] };
+    const outcomes = await Promise.allSettled([
+      service.update(created.id, 1, edited),
+      service.update(created.id, 1, { ...edited, name: "Stale Name" }),
+    ]);
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    const conflict = outcomes.find((outcome) => outcome.status === "rejected");
+    expect(conflict?.status === "rejected" ? conflict.reason : null)
+      .toMatchObject({ code: "revision_conflict", status: 409 });
+    const saved = await service.get(created.id);
+    expect(saved.revision).toBe(2);
+    expect(saved.createdAt).toBe(created.createdAt);
+    expect(saved.name).not.toBe("Stale Name");
+  });
+
+  it("blocks edits for nonterminal workspace and old/new project runs", async () => {
+    const { service, repositories } = await setup();
+    await repositories.projects.create({ id: "project-a", name: "A" });
+    await repositories.projects.create({ id: "project-b", name: "B" });
+    const agent = await service.create({ ...validInput, projectId: "project-a" });
+    await repositories.runs.create({ id: "run-b", projectId: "project-b", state: "interrupted" });
+    await expect(service.update(agent.id, 1, { ...validInput, projectId: "project-b" }))
+      .rejects.toMatchObject({ code: "agent_in_use", status: 409 });
+
+    const globalAgent = await service.create({ ...validInput, name: "Global" });
+    await expect(service.update(globalAgent.id, 1, { ...validInput, name: "Global Updated" }))
+      .rejects.toMatchObject({ code: "agent_in_use", status: 409 });
+  });
+
+  it("allows editing after terminal runs but refuses deletion when any task keeps history", async () => {
+    const { service, repositories } = await setup();
+    await repositories.projects.create({ id: "project-1", name: "Project" });
+    const agent = await service.create({ ...validInput, projectId: "project-1" });
+    await repositories.runs.create({ id: "run-done", projectId: "project-1", state: "done" });
+    await repositories.tasks.create({
+      id: "historical-task", runId: "run-done", ownerAgentId: agent.id, title: "Archived work",
+    });
+    const updated = await service.update(agent.id, 1, { ...validInput, projectId: "project-1", name: "Renamed" });
+    expect(updated).toMatchObject({ revision: 2, name: "Renamed" });
+    await expect(service.delete(agent.id, 2)).rejects.toMatchObject({ code: "agent_referenced", status: 409 });
+    expect(await service.get(agent.id)).toMatchObject({ revision: 2, name: "Renamed" });
+  });
+
+  it("deletes an unused agent and rejects a stale delete without removing it", async () => {
+    const { service } = await setup();
+    const agent = await service.create(validInput);
+    await expect(service.delete(agent.id, 2)).rejects.toMatchObject({ code: "revision_conflict", status: 409 });
+    expect(await service.get(agent.id)).toEqual(agent);
+    await expect(service.delete(agent.id, 1)).resolves.toBeUndefined();
+    await expect(service.get(agent.id)).rejects.toMatchObject({ code: "not_found", status: 404 });
+  });
+
 });
