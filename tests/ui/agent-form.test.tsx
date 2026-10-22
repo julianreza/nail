@@ -19,6 +19,19 @@ const options: AgentOptions = {
     { id: "review", name: "Review", description: "Risiko dan bukti." },
   ],
 };
+const optionsWithCodexCatalog: AgentOptions = {
+  ...options,
+  providers: [
+    {
+      ...options.providers[0]!,
+      models: [
+        { id: "catalog-one", label: "Catalog One" },
+        { id: "catalog-two", label: "Catalog Two" },
+      ],
+    },
+    options.providers[1]!,
+  ],
+};
 
 function renderForm(props: Partial<ComponentProps<typeof AgentForm>> = {}) {
   const onSubmit = props.onSubmit ?? vi.fn();
@@ -67,6 +80,65 @@ it("switching provider selects only that provider's configured model and saves s
     providerId: "p2", model: "model-two", skillIds: ["planning"],
     instructions: "Review tests only.",
   });
+});
+
+it("offers every provider catalog model without selecting the first automatically", async () => {
+  const user = userEvent.setup();
+  renderForm({ options: optionsWithCodexCatalog });
+  await user.selectOptions(screen.getByLabelText("Provider"), "p1");
+  const modelSelect = screen.getByLabelText("Model") as HTMLSelectElement;
+  expect(Array.from(modelSelect.options).map((option) => option.value)).toEqual(["", "catalog-one", "catalog-two"]);
+  expect(modelSelect.value).toBe("");
+});
+
+it("saves the exact catalog model selected for an agent", async () => {
+  const submit = vi.fn();
+  const user = userEvent.setup();
+  renderForm({ options: optionsWithCodexCatalog, onSubmit: submit });
+  await user.type(screen.getByLabelText("Nama"), "Catalog Agent");
+  await user.selectOptions(screen.getByLabelText("Provider"), "p1");
+  await user.selectOptions(screen.getByLabelText("Model"), "catalog-two");
+  await user.click(screen.getByRole("button", { name: "Simpan agent" }));
+  expect(submit).toHaveBeenCalledWith({
+    name: "Catalog Agent", role: "pm", projectId: null,
+    providerId: "p1", model: "catalog-two", skillIds: [], instructions: "",
+  });
+});
+
+it("clears old model options when switching providers", async () => {
+  const user = userEvent.setup();
+  renderForm({ options: optionsWithCodexCatalog });
+  await user.selectOptions(screen.getByLabelText("Provider"), "p1");
+  await user.selectOptions(screen.getByLabelText("Model"), "catalog-two");
+  await user.selectOptions(screen.getByLabelText("Provider"), "p2");
+  const modelSelect = screen.getByLabelText("Model") as HTMLSelectElement;
+  expect(modelSelect.value).toBe("model-two");
+  expect(screen.queryByRole("option", { name: "Catalog One" })).toBeNull();
+  expect(screen.queryByRole("option", { name: "Catalog Two" })).toBeNull();
+});
+
+it("retains a selected model as stale when it disappears from the provider catalog", () => {
+  const initial: AgentView = {
+    id: "agent-catalog", name: "Catalog Agent", role: "engineer", projectId: null,
+    providerId: "p1", model: "catalog-two", skillIds: [], instructions: "",
+    revision: 1, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+  const onSubmit = vi.fn();
+  const onCancel = vi.fn();
+  const { rerender } = render(<AgentForm options={optionsWithCodexCatalog} initial={initial} pending={false} error={null} onSubmit={onSubmit} onCancel={onCancel} />);
+  expect((screen.getByLabelText("Model") as HTMLSelectElement).value).toBe("catalog-two");
+
+  const refreshedOptions: AgentOptions = {
+    ...optionsWithCodexCatalog,
+    providers: [
+      { ...optionsWithCodexCatalog.providers[0]!, models: [{ id: "catalog-one", label: "Catalog One" }] },
+      optionsWithCodexCatalog.providers[1]!,
+    ],
+  };
+  rerender(<AgentForm options={refreshedOptions} initial={initial} pending={false} error={null} onSubmit={onSubmit} onCancel={onCancel} />);
+  expect((screen.getByLabelText("Model") as HTMLSelectElement).value).toBe("catalog-two");
+  expect((screen.getByRole("option", { name: /catalog-two \(tidak lagi dikonfigurasi\)/i }) as HTMLOptionElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Simpan perubahan" }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 it("retains a legacy mismatched model until the owner chooses a current one", async () => {
