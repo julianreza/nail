@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import type { AgentSummary } from "../lib/domain/agent";
 import WorkspaceIcon from "./workspace-icon";
 import MascotIllustration from "./mascot-illustration";
 import DashboardAgentStudio from "./dashboard-agent-studio";
@@ -10,21 +11,31 @@ import DashboardOperations from "./dashboard-operations";
 export interface OverviewPayload {
   projectsCount: number;
   agentsCount: number;
+  agents: AgentSummary[];
   activeRunsCount: number;
   queuedRunsCount: number;
   pendingApprovalsCount: number;
 }
 
+function isAgentSummary(value: unknown): value is AgentSummary {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const summary = value as Record<string, unknown>;
+  return typeof summary.id === "string" && typeof summary.name === "string" && typeof summary.role === "string" &&
+    (summary.projectId === null || typeof summary.projectId === "string") &&
+    (summary.providerId === null || typeof summary.providerId === "string") &&
+    (summary.providerName === null || typeof summary.providerName === "string") &&
+    (summary.providerStatus === null || typeof summary.providerStatus === "string") &&
+    (summary.model === null || typeof summary.model === "string") &&
+    typeof summary.modelMatchesProvider === "boolean" &&
+    Array.isArray(summary.skillIds) && summary.skillIds.every((id) => typeof id === "string");
+}
+
 function isOverviewPayload(value: unknown): value is OverviewPayload {
-  if (typeof value !== "object" || value === null) return false;
-  return [
-    "projectsCount",
-    "agentsCount",
-    "activeRunsCount",
-    "queuedRunsCount",
-    "pendingApprovalsCount",
-  ].every((key) => {
-    const count = (value as Record<string, unknown>)[key];
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const payload = value as Record<string, unknown>;
+  if (!Array.isArray(payload.agents) || !payload.agents.every(isAgentSummary) || payload.agentsCount !== payload.agents.length) return false;
+  return ["projectsCount", "agentsCount", "activeRunsCount", "queuedRunsCount", "pendingApprovalsCount"].every((key) => {
+    const count = payload[key];
     return typeof count === "number" && Number.isSafeInteger(count) && count >= 0;
   });
 }
@@ -72,7 +83,7 @@ export function DashboardSummary({ overview }: { overview: OverviewPayload }) {
         ))}
       </div>
       <div className="dashboard-command-grid">
-        <DashboardAgentStudio agentsCount={overview.agentsCount} />
+        <DashboardAgentStudio agents={overview.agents} />
         <DashboardOperations overview={overview} />
       </div>
       <section className="dashboard-empty-panel">

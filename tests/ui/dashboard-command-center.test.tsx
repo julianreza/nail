@@ -7,7 +7,7 @@ import { DashboardSummary } from "../../app/dashboard-overview";
 describe("dashboard command center integration", () => {
   it("adds both panels without losing the existing empty state", () => {
     const html = renderToStaticMarkup(createElement(DashboardSummary, {
-      overview: { projectsCount: 0, agentsCount: 0, activeRunsCount: 0, queuedRunsCount: 0, pendingApprovalsCount: 0 },
+      overview: { projectsCount: 0, agentsCount: 0, agents: [], activeRunsCount: 0, queuedRunsCount: 0, pendingApprovalsCount: 0 },
     }));
     expect(html).toContain("Agent studio");
     expect(html).toContain("Antrean &amp; keputusan");

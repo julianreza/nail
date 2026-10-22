@@ -32,7 +32,10 @@ describe("reference workspace presentation", () => {
 
   it.each([0, 7])("shows real project/agent counts in the hero and links to actual projects (%s projects)", (projectsCount) => {
     const markup = renderToStaticMarkup(createElement(DashboardSummary, {
-      overview: { projectsCount, agentsCount: 2, activeRunsCount: 0, queuedRunsCount: 0, pendingApprovalsCount: 0 },
+      overview: { projectsCount, agentsCount: 2, agents: [
+        { id: "agent-1", name: "Planner", role: "pm", projectId: null, providerId: null, providerName: null, providerStatus: null, model: null, modelMatchesProvider: true, skillIds: [] },
+        { id: "agent-2", name: "Reviewer", role: "qa", projectId: null, providerId: null, providerName: null, providerStatus: null, model: null, modelMatchesProvider: true, skillIds: [] },
+      ], activeRunsCount: 0, queuedRunsCount: 0, pendingApprovalsCount: 0 },
     }));
     expect(markup).toContain("data-dashboard-mascot");
     expect(markup).toContain('viewBox="0 0 240 200"');

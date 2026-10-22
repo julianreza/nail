@@ -11,6 +11,7 @@ describe("workspace empty states", () => {
         overview: {
           projectsCount: 0,
           agentsCount: 0,
+          agents: [],
           activeRunsCount: 0,
           queuedRunsCount: 0,
           pendingApprovalsCount: 0,
@@ -30,6 +31,10 @@ describe("workspace empty states", () => {
         overview: {
           projectsCount: 3,
           agentsCount: 2,
+          agents: [
+            { id: "agent-1", name: "PM one", role: "pm", projectId: null, providerId: null, providerName: null, providerStatus: null, model: null, modelMatchesProvider: true, skillIds: [] },
+            { id: "agent-2", name: "PM two", role: "pm", projectId: null, providerId: null, providerName: null, providerStatus: null, model: null, modelMatchesProvider: true, skillIds: [] },
+          ],
           activeRunsCount: 1,
           queuedRunsCount: 4,
           pendingApprovalsCount: 2,
