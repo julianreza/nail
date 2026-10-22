@@ -380,6 +380,72 @@ const migrations: readonly Migration[] = [
       END $$;
     `,
   },
+  {
+    version: 13,
+    name: "direct_codex_oauth_accounts",
+    sql: `
+      ALTER TABLE providers DROP CONSTRAINT providers_auth_mode_check;
+      ALTER TABLE providers ADD CONSTRAINT providers_auth_mode_check
+        CHECK (auth_mode IN ('api_key', 'subscription_cli', 'subscription_oauth', 'none'));
+      ALTER TABLE providers ADD CONSTRAINT direct_codex_provider_valid CHECK (
+        auth_mode <> 'subscription_oauth' OR (
+          kind IS NOT NULL AND kind = 'codex' AND secret_reference IS NULL AND status <> 'ready'
+          AND capabilities_json::jsonb = '[]'::jsonb
+        )
+      );
+      CREATE UNIQUE INDEX direct_codex_provider_unique ON providers(kind)
+        WHERE auth_mode = 'subscription_oauth';
+
+      CREATE TABLE codex_direct_accounts (
+        provider_id TEXT PRIMARY KEY REFERENCES providers(id) ON DELETE RESTRICT,
+        state TEXT NOT NULL CHECK (state IN ('not_configured', 'needs_login', 'connected')),
+        revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+        credential_ciphertext TEXT,
+        catalog_json JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(catalog_json) = 'array'),
+        catalog_checked_at TIMESTAMPTZ,
+        lease_id TEXT,
+        lease_kind TEXT CHECK (lease_kind IN ('login', 'refresh', 'models', 'probe')),
+        lease_until TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK ((state = 'connected') = (credential_ciphertext IS NOT NULL)),
+        CHECK ((lease_id IS NULL AND lease_kind IS NULL AND lease_until IS NULL)
+          OR (lease_id IS NOT NULL AND lease_kind IS NOT NULL AND lease_until IS NOT NULL))
+      );
+      CREATE TABLE codex_direct_logins (
+        id TEXT PRIMARY KEY,
+        provider_id TEXT NOT NULL REFERENCES codex_direct_accounts(provider_id) ON DELETE CASCADE,
+        owner_session_hash TEXT NOT NULL,
+        account_revision INTEGER NOT NULL CHECK (account_revision > 0),
+        state TEXT NOT NULL CHECK (state IN ('pending', 'connected', 'cancelled', 'expired', 'failed')),
+        grant_ciphertext TEXT,
+        expires_at TIMESTAMPTZ NOT NULL,
+        next_poll_at TIMESTAMPTZ NOT NULL,
+        interval_seconds INTEGER NOT NULL CHECK (interval_seconds BETWEEN 5 AND 120),
+        lease_id TEXT,
+        lease_until TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK ((state = 'pending') = (grant_ciphertext IS NOT NULL)),
+        CHECK ((lease_id IS NULL) = (lease_until IS NULL))
+      );
+      CREATE UNIQUE INDEX codex_direct_one_pending_login
+        ON codex_direct_logins(provider_id) WHERE state = 'pending';
+      CREATE INDEX codex_direct_logins_expiry ON codex_direct_logins(expires_at);
+
+      DO $$
+      DECLARE table_name TEXT; role_name TEXT;
+      BEGIN
+        FOREACH table_name IN ARRAY ARRAY['codex_direct_accounts', 'codex_direct_logins'] LOOP
+          EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
+          EXECUTE format('REVOKE ALL ON TABLE %I FROM PUBLIC', table_name);
+          FOREACH role_name IN ARRAY ARRAY['anon', 'authenticated', 'service_role'] LOOP
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN
+              EXECUTE format('REVOKE ALL ON TABLE %I FROM %I', table_name, role_name);
+            END IF;
+          END LOOP;
+        END LOOP;
+      END $$;
+    `,
+  },
 ];
 
 export async function migrateDatabase(database: Database): Promise<void> {

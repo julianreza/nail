@@ -28,7 +28,7 @@ export interface AgentRecord {
   updatedAt: string;
 }
 
-export type ProviderAuthMode = "api_key" | "subscription_cli" | "none";
+export type ProviderAuthMode = "api_key" | "subscription_cli" | "subscription_oauth" | "none";
 
 export type ProviderKind = "deepseek" | SubscriptionProviderKind;
 
@@ -337,9 +337,14 @@ export function createRepositories(database: Database) {
     }): Promise<ProviderRecord> {
       const kind = input.kind ?? null;
       const secretReference = input.secretReference ?? null;
+      const capabilities = input.capabilities ?? [];
       if (input.authMode === "subscription_cli" && (!kind || secretReference !== null)) {
         throw new Error("Subscription providers require a kind and must not store a secret reference");
       }
+      if (
+        input.authMode === "subscription_oauth" &&
+        (kind !== "codex" || secretReference !== null || input.status === "ready" || capabilities.length !== 0)
+      ) throw new Error("Direct OAuth providers must be unavailable, Codex-only and secret-free");
       (await database
         .prepare(
           `INSERT INTO providers (id, name, kind, status, model, auth_mode, secret_reference, capabilities_json)
