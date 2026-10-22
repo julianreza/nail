@@ -6,7 +6,7 @@ import DashboardOperations from "../../app/dashboard-operations";
 describe("dashboard operations", () => {
   it.each([0, 4, 1234])("shows actual stored queue and approval totals: %s", (count) => {
     const html = renderToStaticMarkup(createElement(DashboardOperations, {
-      overview: { projectsCount: 0, agentsCount: 0, activeRunsCount: 0, queuedRunsCount: count, pendingApprovalsCount: count },
+      overview: { projectsCount: 0, agentsCount: 0, agents: [], activeRunsCount: 0, queuedRunsCount: count, pendingApprovalsCount: count },
     }));
     expect(html).toContain("Antrean &amp; keputusan");
     expect(html).toContain(`>${new Intl.NumberFormat("id-ID").format(count)}</strong>`);
