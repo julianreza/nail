@@ -37,7 +37,7 @@ Create `<connector-root>/accounts/<bindingId>` with mode `0700` for each dedicat
 
 Use `kind` exactly `codex`, `antigravity`, or `claude`; use the CLI executable basename exactly `codex`, `agy`, or `claude`. Binding IDs use lowercase letters, digits, `_` or `-`, 1–64 characters. The model must be accepted by the installed provider client. Do not put credentials in this file. Do not select `claude` for a working subscription until policy verification has passed.
 
-Keep the account homes outside the application, sandbox and personal home. An absent CLI executable is retained as a safe `not_installed` binding so the dashboard can report the blocker. Once installed, a binary that has not passed the compatibility/isolation gates remains `unsupported`; the connector will not claim that a successful filesystem check proves a provider account is authenticated.
+Keep the account homes outside the application, sandbox and personal home. An absent CLI executable is retained as a safe `not_installed` binding so the dashboard can report the blocker. A recognized Codex ChatGPT auth status can report `connected`, but an unverified auth schema remains `unsupported`; a successful filesystem check never proves authentication. No subscription account is inference-ready until the separate compatibility/isolation gates pass.
 
 ## Run the connector
 
@@ -53,7 +53,7 @@ Stop with `Ctrl+C` during local development or send `SIGTERM` to the service pro
 
 ## Official CLI notes
 
-- **Codex:** official docs support ChatGPT sign-in (`codex login`) and distinguish it from API-key billing. Nail currently does not parse `codex login status` because the CLI is absent and the status schema has not been validated here. API-key mode is not an acceptable substitute for the subscription adapter.
+- **Codex:** official docs support ChatGPT sign-in (`codex login`) and distinguish it from API-key billing. Nail parses only recognized cached auth-status messages from stderr in a dedicated HOME/CODEX_HOME with explicit file storage; API-key mode never counts as connected. See [Codex OAuth setup](codex-cli-oauth.md) for private-terminal login and headless alternatives. Parsing is source-verified with synthetic tests; live login compatibility is unverified until owner acceptance. A connected account remains unavailable for inference.
 - **Antigravity:** official docs call the CLI `agy` and document `agy models` plus headless JSONL. Nail has not verified personal OAuth status or tool-denial behavior for an installed version; no `agy login` command is assumed.
 - **Claude Code:** official authentication/policy docs were blocked during the compatibility review. The UI intentionally blocks it; do not configure a different billing/auth mode to bypass that gate.
 

@@ -42,9 +42,11 @@ No CLI version, login status, headless invocation, account home, or model invent
 - CLI documents `codex login` for browser sign-in and `codex login status` for inspecting the active login method. Codex credentials are kept in the CLI credential store / `CODEX_HOME`; they are bearer credentials and must be protected like a password.
 - `codex exec --json` emits JSONL events; `--ephemeral` avoids saving rollout files. Codex CLI is an agent CLI, not documented as a raw token-capped completion API. API-key usage is billed separately. Its default automation sandbox is read-only, but that alone does not prove project instructions/tools/MCP are disabled.
 
-**Not verified on this host:** installed version, exact CLI output for `codex login status`, dedicated `CODEX_HOME` login flow, whether this execution profile enforces ChatGPT-only auth, exact model selection behavior, and a hard output-token cap. No login state or auth file was read.
+**Auth-status implementation update:** Nail now parses only recognized stderr status messages using the [pinned official CLI source](https://github.com/openai/codex/blob/430a16799d90e296fb27b1e94f206023902b7e56/codex-rs/cli/src/login.rs#L448-L514). `Logged in using ChatGPT` with exit 0 maps to `connected`; `Not logged in` with exit 1 maps to `needs_login`. API-key status and other auth modes never count as ChatGPT-connected, and no raw diagnostics leave the adapter. Checks use dedicated `HOME === CODEX_HOME`, explicit file credential storage, bounded processes and empty scratch cwd. Synthetic tests verify this translation, not a real vendor session. See [Codex OAuth setup](codex-cli-oauth.md).
 
-**Plan gate:** `connectionSupported=false` on this host (client absent). Documented ChatGPT login is a potential supported route, but status must remain not-installed until verified with an installed official CLI. `completionSupported=false` until tool isolation is established and a hard finite output budget can be enforced; API-key fallback is prohibited.
+**Not verified on this host:** installed version compatibility, live dedicated-home login, cached-token validity/refresh, subscription entitlement, model selection and hard output-token cap. No live login state or auth file was read.
+
+**Plan gate:** recognized cached ChatGPT status may produce `connected`, but never `ready`; an absent binary remains `not_installed`, and unknown output remains `unsupported`. Live login compatibility is unverified until owner acceptance with the deployed version. `completionSupported=false` until tool isolation is established and a hard finite output budget can be enforced; API-key fallback is prohibited.
 
 ## Claude Code (`claude`)
 
