@@ -88,6 +88,7 @@ it("offers every provider catalog model without selecting the first automaticall
   await user.selectOptions(screen.getByLabelText("Provider"), "p1");
   const modelSelect = screen.getByLabelText("Model") as HTMLSelectElement;
   expect(Array.from(modelSelect.options).map((option) => option.value)).toEqual(["", "catalog-one", "catalog-two"]);
+  expect(modelSelect.classList.contains("agent-model-select")).toBe(true);
   expect(modelSelect.value).toBe("");
 });
 

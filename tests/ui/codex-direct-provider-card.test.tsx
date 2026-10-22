@@ -80,8 +80,11 @@ it("polls no sooner than the interval and never overlaps requests", async () => 
   expect(fetcher.mock.calls.filter(([url]) => url === "/api/providers/codex-direct/login/poll")).toHaveLength(2);
 });
 
-it("reads account and model back after login, selects only listed models, and keeps inference disabled", async () => {
+it("refreshes catalog after login without showing provider-level model controls", async () => {
   let account: AccountFixture = baseAccount;
+  let providerRefreshEvents = 0;
+  const onProviderRefresh = () => { providerRefreshEvents += 1; };
+  window.addEventListener("provider-list-refresh", onProviderRefresh);
   const calls: Array<[string, string]> = [];
   installFetch(async (url, init) => {
     const method = init?.method ?? "GET";
@@ -98,13 +101,10 @@ it("reads account and model back after login, selects only listed models, and ke
     }
     if (url === "/api/providers/codex-direct/models") {
       account = { ...connectedAccount, revision: 3 };
-      return Response.json({ models: [{ id: "listed-model", label: "Listed model" }], checkedAt: "2026-10-22T00:00:00.000Z", account });
-    }
-    if (url === "/api/providers/codex-direct/model") {
-      const body = JSON.parse(String(init?.body)) as { model: string };
-      expect(body.model).toBe("listed-model");
-      account = { ...connectedAccount, revision: 4, model: body.model };
-      return Response.json(account);
+      return Response.json({ models: [
+        { id: "catalog-one", label: "Catalog One" },
+        { id: "catalog-two", label: "Catalog Two" },
+      ], account });
     }
     throw new Error(`Unexpected request ${method} ${url}`);
   });
@@ -114,133 +114,135 @@ it("reads account and model back after login, selects only listed models, and ke
   await act(async () => { fireEvent.click(within(card).getByRole("button", { name: "Hubungkan ChatGPT" })); });
   expect(within(card).getByText("ABCD-EFGH")).toBeTruthy();
   await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
-  expect(within(card).getByRole("combobox", { name: "Model Codex" })).toBeTruthy();
-  await act(async () => {
-    fireEvent.change(within(card).getByRole("combobox", { name: "Model Codex" }), { target: { value: "listed-model" } });
-    fireEvent.click(within(card).getByRole("button", { name: "Simpan model" }));
-  });
-  expect(within(card).getByText("Akun terhubung; penggunaan agent belum diaktifkan.")).toBeTruthy();
-  expect(within(card).getByText("Model tersimpan: listed-model")).toBeTruthy();
-  expect(calls).toContainEqual(["/api/providers/codex-direct/models", "POST"]);
-  expect(calls).toContainEqual(["/api/providers/codex-direct/model", "POST"]);
+  expect(within(card).getByText("Pilih model saat menambah atau mengedit agent.")).toBeTruthy();
+  expect(within(card).getByText("2 model tersedia untuk agent.")).toBeTruthy();
+  expect(within(card).queryByRole("combobox")).toBeNull();
+  expect(within(card).queryByRole("button", { name: "Simpan model" })).toBeNull();
+  expect(within(card).queryByText(/^Model saat ini:/)).toBeNull();
+  expect(calls.filter(([url]) => url === "/api/providers/codex-direct/models")).toHaveLength(1);
+  expect(calls.some(([url]) => url === "/api/providers/codex-direct/model")).toBe(false);
   expect(calls.filter(([url]) => url === "/api/providers/codex-direct/login/start")).toHaveLength(1);
   expect(JSON.stringify(calls)).not.toContain("auth.json");
+  expect(providerRefreshEvents).toBe(1);
+  window.removeEventListener("provider-list-refresh", onProviderRefresh);
 });
 
-it("saves a listed model with ordinary browser selection and reads the same model back", async () => {
+
+it("shows refreshed catalog counts without provider-level model controls", async () => {
   let account: AccountFixture = { ...connectedAccount };
-  const calls: Array<{ url: string; body: unknown }> = [];
-  installFetch(async (url, init) => {
-    calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
+  const revisions: number[] = [];
+  const fetcher = installFetch(async (url, init) => {
     if (url === "/api/providers/codex-direct/account") return Response.json(account);
     if (url === "/api/providers/codex-direct/models") {
-      account = { ...account, revision: 3 };
-      return Response.json({ models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol" }], checkedAt: new Date().toISOString(), account });
+      revisions.push((JSON.parse(String(init?.body)) as { expectedRevision: number }).expectedRevision);
+      account = { ...account, revision: account.revision + 1 };
+      return Response.json({ models: [
+        { id: "catalog-one", label: "Catalog One" },
+        { id: "catalog-two", label: "Catalog Two" },
+      ], account });
     }
-    if (url === "/api/providers/codex-direct/model") {
-      const body = JSON.parse(String(init?.body));
-      expect(body).toEqual({ model: "gpt-6.1-sol", expectedRevision: 3 });
-      account = { ...account, model: body.model, revision: 4 };
-      return Response.json(account);
-    }
-    throw new Error("Unexpected request");
+    throw new Error(`Unexpected request ${url}`);
   });
   const user = userEvent.setup();
   render(<CodexDirectProviderCard />);
   await screen.findByText("Akun terhubung; penggunaan agent belum diaktifkan.");
+  expect(screen.queryByText("Tidak ada model yang tersedia.")).toBeNull();
+  expect(screen.getByText("Pilih model saat menambah atau mengedit agent.")).toBeTruthy();
+
   await user.click(screen.getByRole("button", { name: "Perbarui daftar model" }));
-  await screen.findByRole("option", { name: "GPT-6.1-Sol" });
-  await user.selectOptions(screen.getByRole("combobox", { name: "Model Codex" }), "gpt-6.1-sol");
-  expect((screen.getByRole("button", { name: "Simpan model" }) as HTMLButtonElement).disabled).toBe(false);
-  await user.click(screen.getByRole("button", { name: "Simpan model" }));
-  await screen.findByText("Model tersimpan: gpt-6.1-sol");
-  expect(screen.queryByRole("alert")).toBeNull();
-  expect(calls.slice(-2).map((item) => item.url)).toEqual(["/api/providers/codex-direct/model", "/api/providers/codex-direct/account"]);
+  await screen.findByText("2 model tersedia untuk agent.");
+  await user.click(screen.getByRole("button", { name: "Perbarui daftar model" }));
+  await screen.findByText("2 model tersedia untuk agent.");
+  expect(revisions).toEqual([2, 3]);
+  expect(screen.queryByRole("combobox")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Simpan model" })).toBeNull();
+  expect(screen.queryByText(/^Model saat ini:/)).toBeNull();
+  expect(fetcher.mock.calls.some(([url]) => String(url) === "/api/providers/codex-direct/model")).toBe(false);
 });
 
-it("releases stuck loading after a stalled model refresh and preserves the chosen model", async () => {
+it("shows an empty catalog only after a successful refresh", async () => {
+  installFetch(async (url) => {
+    if (url === "/api/providers/codex-direct/account") return Response.json(connectedAccount);
+    if (url === "/api/providers/codex-direct/models") return Response.json({ models: [], account: { ...connectedAccount, revision: 3 } });
+    throw new Error(`Unexpected request ${url}`);
+  });
+  const user = userEvent.setup();
+  render(<CodexDirectProviderCard />);
+  await screen.findByText("Akun terhubung; penggunaan agent belum diaktifkan.");
+  expect(screen.queryByText("Tidak ada model yang tersedia.")).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Perbarui daftar model" }));
+  expect(await screen.findByText("Tidak ada model yang tersedia.")).toBeTruthy();
+});
+
+it("keeps provider disconnect behind its confirmation dialog", async () => {
+  installFetch(async (url) => {
+    if (url === "/api/providers/codex-direct/account") return Response.json(connectedAccount);
+    throw new Error(`Unexpected request ${url}`);
+  });
+  const user = userEvent.setup();
+  render(<CodexDirectProviderCard />);
+  await screen.findByText("Akun terhubung; penggunaan agent belum diaktifkan.");
+  await user.click(screen.getByRole("button", { name: "Putuskan koneksi" }));
+  expect(screen.getByRole("alertdialog", { name: "Konfirmasi putus koneksi Codex" })).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Batalkan" }));
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+});
+
+it("releases loading after a stalled catalog refresh and preserves the last count", async () => {
   let catalogReads = 0;
   let stalledSignal: AbortSignal | null | undefined;
   installFetch(async (url, init) => {
     if (url === "/api/providers/codex-direct/account") return Response.json(connectedAccount);
     if (url === "/api/providers/codex-direct/models") {
       catalogReads += 1;
-      if (catalogReads === 1) return Response.json({ models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol" }], account: { ...connectedAccount, revision: 3 } });
+      if (catalogReads === 1) return Response.json({ models: [{ id: "catalog-one", label: "Catalog One" }], account: { ...connectedAccount, revision: 3 } });
       stalledSignal = init?.signal;
       return new Promise<Response>(() => {});
     }
-    throw new Error("Unexpected request");
+    throw new Error(`Unexpected request ${url}`);
   });
   const user = userEvent.setup();
   render(<CodexDirectProviderCard />);
   await screen.findByText("Akun terhubung; penggunaan agent belum diaktifkan.");
   await user.click(screen.getByRole("button", { name: "Perbarui daftar model" }));
-  await screen.findByRole("option", { name: "GPT-6.1-Sol" });
-  await user.selectOptions(screen.getByRole("combobox", { name: "Model Codex" }), "gpt-6.1-sol");
+  await screen.findByText("1 model tersedia untuk agent.");
   vi.useFakeTimers();
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Perbarui daftar model" })); });
-  expect((screen.getByRole("button", { name: "Simpan model" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Perbarui daftar model" }) as HTMLButtonElement).disabled).toBe(true);
   await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
   expect(screen.getByRole("alert").textContent).toContain("Permintaan Codex melewati batas waktu");
   expect(stalledSignal?.aborted).toBe(true);
-  expect((screen.getByRole("combobox", { name: "Model Codex" }) as HTMLSelectElement).value).toBe("gpt-6.1-sol");
-  expect((screen.getByRole("button", { name: "Simpan model" }) as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.getByText("1 model tersedia untuk agent.")).toBeTruthy();
   expect((screen.getByRole("button", { name: "Perbarui daftar model" }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole("button", { name: "Muat ulang status" }) as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.queryByRole("combobox")).toBeNull();
 });
 
-it("releases loading if a save response body stalls and does not show a false save success", async () => {
+it("keeps the last successful catalog count visible when refresh fails", async () => {
+  let catalogReads = 0;
   installFetch(async (url) => {
     if (url === "/api/providers/codex-direct/account") return Response.json(connectedAccount);
-    if (url === "/api/providers/codex-direct/models") return Response.json({ models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol" }], account: { ...connectedAccount, revision: 3 } });
-    if (url === "/api/providers/codex-direct/model") return new Response(new ReadableStream<Uint8Array>({ start() {} }), { status: 200 });
-    throw new Error("Unexpected request");
+    if (url === "/api/providers/codex-direct/models") {
+      catalogReads += 1;
+      if (catalogReads === 1) return Response.json({ models: [
+        { id: "catalog-one", label: "Catalog One" },
+        { id: "catalog-two", label: "Catalog Two" },
+      ], account: { ...connectedAccount, revision: 3 } });
+      return Response.json({ error: "Catalog refresh failed" }, { status: 503 });
+    }
+    throw new Error(`Unexpected request ${url}`);
   });
   const user = userEvent.setup();
   render(<CodexDirectProviderCard />);
   await screen.findByText("Akun terhubung; penggunaan agent belum diaktifkan.");
   await user.click(screen.getByRole("button", { name: "Perbarui daftar model" }));
-  await screen.findByRole("option", { name: "GPT-6.1-Sol" });
-  await user.selectOptions(screen.getByRole("combobox", { name: "Model Codex" }), "gpt-6.1-sol");
-  vi.useFakeTimers();
-  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Simpan model" })); });
-  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
-  expect(screen.getByRole("alert").textContent).toContain("Permintaan Codex melewati batas waktu");
-  expect(screen.queryByText("Model tersimpan: gpt-6.1-sol")).toBeNull();
-  expect((screen.getByRole("button", { name: "Simpan model" }) as HTMLButtonElement).disabled).toBe(false);
+  await screen.findByText("2 model tersedia untuk agent.");
+  await user.click(screen.getByRole("button", { name: "Perbarui daftar model" }));
+  expect(await screen.findByRole("alert")).toBeTruthy();
+  expect(screen.getByText("2 model tersedia untuk agent.")).toBeTruthy();
+  expect(screen.queryByText("0 model tersedia untuk agent.")).toBeNull();
 });
 
-it("checks a timed-out save through explicit status readback without resubmitting it", async () => {
-  let stored: AccountFixture = { ...connectedAccount };
-  let saves = 0;
-  installFetch(async (url, init) => {
-    if (url === "/api/providers/codex-direct/account") return Response.json(stored);
-    if (url === "/api/providers/codex-direct/models") {
-      stored = { ...stored, revision: 3 };
-      return Response.json({ models: [{ id: "gpt-6.1-sol", label: "GPT-6.1-Sol" }], account: stored });
-    }
-    if (url === "/api/providers/codex-direct/model") {
-      saves += 1;
-      expect(JSON.parse(String(init?.body)).model).toBe("gpt-6.1-sol");
-      stored = { ...stored, model: "gpt-6.1-sol", revision: 4 };
-      return new Promise<Response>(() => {});
-    }
-    throw new Error("Unexpected request");
-  });
-  const user = userEvent.setup();
-  render(<CodexDirectProviderCard />);
-  await screen.findByText("Akun terhubung; penggunaan agent belum diaktifkan.");
-  await user.click(screen.getByRole("button", { name: "Perbarui daftar model" }));
-  await screen.findByRole("option", { name: "GPT-6.1-Sol" });
-  await user.selectOptions(screen.getByRole("combobox", { name: "Model Codex" }), "gpt-6.1-sol");
-  vi.useFakeTimers();
-  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Simpan model" })); });
-  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
-  expect(screen.getByRole("alert")).toBeTruthy();
-  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Muat ulang status" })); });
-  expect(screen.queryByRole("alert")).toBeNull();
-  expect(screen.getByText("Model saat ini: gpt-6.1-sol")).toBeTruthy();
-  expect(saves).toBe(1);
-});
 
 it("aborts active polling and clears timer on unmount", async () => {
   let pollSignal: AbortSignal | undefined;

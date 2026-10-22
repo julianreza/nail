@@ -170,6 +170,7 @@ export default function AgentForm({ options, initial, pending, error, onSubmit, 
         <div className="agent-form-field">
           <label htmlFor="agent-model">Model</label>
           <select
+            className="agent-model-select"
             disabled={pending || !value.providerId || models.length === 0}
             id="agent-model"
             onChange={(event) => setValue((current) => ({ ...current, model: event.target.value || null }))}

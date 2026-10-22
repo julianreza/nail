@@ -37,7 +37,7 @@ function isModels(value: unknown): value is DirectModel[] {
 export default function CodexDirectProviderCard() {
   const [account, setAccount] = useState<DirectAccountView | null>(null);
   const [models, setModels] = useState<DirectModel[]>([]);
-  const [selectedModel, setSelectedModel] = useState("");
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
   const [login, setLogin] = useState<LoginState | null>(null);
   const [loading, setLoading] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
@@ -51,7 +51,6 @@ export default function CodexDirectProviderCard() {
       const value = await requestCodexJson("/api/providers/codex-direct/account", { signal });
       if (!isAccount(value)) throw new Error("Status akun Codex tidak valid.");
       setAccount(value);
-      setSelectedModel(value.model ?? "");
       setError("");
       return value;
     } catch (reason) {
@@ -78,10 +77,11 @@ export default function CodexDirectProviderCard() {
       if (typeof result !== "object" || result === null || !("models" in result) || !isModels(result.models) ||
         !("account" in result) || !isAccount(result.account)) throw new Error("Daftar model Codex tidak valid.");
       setModels(result.models);
+      setCatalogLoaded(true);
       setAccount(result.account);
-      setSelectedModel(result.account.model ?? "");
       setError("");
-      if (result.models.length === 0) setMessage("Tidak ada model yang tersedia.");
+      setMessage("");
+      window.dispatchEvent(new Event("provider-list-refresh"));
       return result.account;
     } catch (reason) {
       if (!signal?.aborted) setError(reason instanceof Error ? reason.message : "Daftar model Codex tidak dapat dimuat.");
@@ -112,8 +112,10 @@ export default function CodexDirectProviderCard() {
       setLogin(null);
       setMessage("Akun terhubung; penggunaan agent belum diaktifkan.");
       const saved = await loadAccount(followup.signal);
-      if (saved?.state === "connected") await loadModels(saved.revision, followup.signal);
-      window.dispatchEvent(new Event("provider-list-refresh"));
+      const refreshed = saved?.state === "connected"
+        ? await loadModels(saved.revision, followup.signal)
+        : null;
+      if (!refreshed) window.dispatchEvent(new Event("provider-list-refresh"));
     } catch (reason) {
       if (!signal.aborted) {
         setLogin(null);
@@ -222,29 +224,6 @@ export default function CodexDirectProviderCard() {
     }
   }
 
-  async function saveModel() {
-    if (!account || !selectedModel || loading) return;
-    setLoading(true);
-    setError("");
-    try {
-      const result = await requestCodexJson("/api/providers/codex-direct/model", {
-        method: "POST", headers: { "content-type": "application/json" }, cache: "no-store",
-        body: JSON.stringify({ model: selectedModel, expectedRevision: account.revision }),
-      });
-      if (!isAccount(result)) throw new Error("Status model Codex tidak valid.");
-      const readback = await loadAccount();
-      if (!readback || readback.providerId !== result.providerId || readback.model !== selectedModel) {
-        throw new Error("Model Codex belum terverifikasi tersimpan.");
-      }
-      setMessage(`Model tersimpan: ${selectedModel}`);
-      window.dispatchEvent(new Event("provider-list-refresh"));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Model Codex tidak dapat disimpan.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function disconnect() {
     if (!account || loading) return;
     setLoading(true);
@@ -257,7 +236,7 @@ export default function CodexDirectProviderCard() {
       if (!isAccount(result)) throw new Error("Status akun Codex tidak valid.");
       setAccount(result);
       setModels([]);
-      setSelectedModel("");
+      setCatalogLoaded(false);
       setConfirmDisconnect(false);
       setMessage("Binding Codex lokal dilepas; ini tidak menjamin sesi ChatGPT dicabut.");
       window.dispatchEvent(new Event("provider-list-refresh"));
@@ -283,17 +262,12 @@ export default function CodexDirectProviderCard() {
         <div className="subscription-provider-actions">
           <p className="inline-status" role="status">Akun terhubung; penggunaan agent belum diaktifkan.</p>
           <button className="button-secondary" disabled={loading} onClick={() => void refreshModelList()} type="button">Perbarui daftar model</button>
-          {models.length === 0 ? <p className="muted-copy">Tidak ada model yang tersedia</p> : (
-            <>
-              <label htmlFor="codex-direct-model">Model Codex</label>
-              <select id="codex-direct-model" aria-label="Model Codex" disabled={loading} onChange={(event) => setSelectedModel(event.target.value)} value={selectedModel}>
-                <option value="">Pilih model dari daftar akun</option>
-                {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
-              </select>
-              <button className="button-primary" disabled={loading || !selectedModel || selectedModel === account.model} onClick={() => void saveModel()} type="button">Simpan model</button>
-            </>
-          )}
-          <p className="muted-copy">Model saat ini: {account.model ?? "belum dipilih"}</p>
+          <p className="muted-copy">Pilih model saat menambah atau mengedit agent.</p>
+          {catalogLoaded ? (
+            <p className="muted-copy">
+              {models.length === 0 ? "Tidak ada model yang tersedia." : `${models.length} model tersedia untuk agent.`}
+            </p>
+          ) : null}
           {confirmDisconnect ? (
             <div role="alertdialog" aria-label="Konfirmasi putus koneksi Codex">
               <p>Putuskan koneksi Codex dari Nail? Ini tidak menjamin sesi ChatGPT dicabut dari OpenAI.</p>
