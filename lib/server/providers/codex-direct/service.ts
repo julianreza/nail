@@ -86,26 +86,53 @@ export function createCodexDirectService(dependencies: CodexDirectServiceDepende
     const current = await dependencies.repository.readAccount();
     if (!current || current.state !== "connected") throw new CodexDirectError("needs_login");
     if (current.revision !== expectedRevision) throw new CodexDirectError("busy");
-    const time = now();
-    const lease = await dependencies.repository.claimAccount(current.providerId, current.revision, "models", time);
-    if (!lease) throw new CodexDirectError("busy");
+    let activeAccount = current;
+    let activeLease = await dependencies.repository.claimAccount(current.providerId, current.revision, "models", now());
+    if (!activeLease) throw new CodexDirectError("busy");
     try {
-      const latest = await dependencies.repository.readAccount(current.providerId);
-      if (!latest || latest.revision !== current.revision || latest.leaseId !== lease.leaseId) throw new CodexDirectError("busy");
-      const tokens = await readCredential(latest);
-      if (tokens.expiresAt <= time.getTime()) throw new CodexDirectError("needs_login");
+      let tokens = await readCredential(activeAccount);
+      if (tokens.expiresAt <= now().getTime() + 60_000) {
+        let rotated: CodexTokens;
+        try {
+          rotated = await oauth.refresh(tokens, signal);
+        } catch (error) {
+          if (isCodexDirectError(error) && error.code === "rate_limited") throw error;
+          const invalidated = await dependencies.repository.finishAccount(activeAccount.providerId, activeAccount.revision, activeLease.leaseId, {
+            state: "needs_login", credentialCiphertext: null, catalog: [], catalogCheckedAt: null, model: null,
+          });
+          if (!invalidated) throw new CodexDirectError("busy");
+          activeLease = null;
+          throw new CodexDirectError("needs_login");
+        }
+        const nextRevision = activeAccount.revision + 1;
+        const rotatedCiphertext = sealCodexSecret(rotated, dependencies.encryptionKey,
+          codexAccountAad(activeAccount.providerId, nextRevision));
+        const stored = await dependencies.repository.finishAccount(activeAccount.providerId, activeAccount.revision, activeLease.leaseId, {
+          state: "connected", credentialCiphertext: rotatedCiphertext,
+          catalog: activeAccount.catalog, catalogCheckedAt: activeAccount.catalogCheckedAt,
+          model: activeAccount.model,
+        });
+        if (!stored) throw new CodexDirectError("busy");
+        activeAccount = (await dependencies.repository.readAccount(activeAccount.providerId))!;
+        activeLease = await dependencies.repository.claimAccount(activeAccount.providerId, activeAccount.revision, "models", now());
+        if (!activeLease) throw new CodexDirectError("busy");
+        activeAccount = (await dependencies.repository.readAccount(activeAccount.providerId))!;
+        if (!activeAccount || activeAccount.leaseId !== activeLease.leaseId) throw new CodexDirectError("busy");
+        tokens = await readCredential(activeAccount);
+      }
       const models = await oauth.models(tokens, signal);
       const checkedAt = now().toISOString();
-      const nextRevision = latest.revision + 1;
-      const credentialCiphertext = sealCodexSecret(tokens, dependencies.encryptionKey, codexAccountAad(latest.providerId, nextRevision));
-      const selectedModel = latest.model && models.some((model) => model.id === latest.model) ? latest.model : null;
-      const saved = await dependencies.repository.finishAccount(latest.providerId, latest.revision, lease.leaseId, {
+      const nextRevision = activeAccount.revision + 1;
+      const credentialCiphertext = sealCodexSecret(tokens, dependencies.encryptionKey, codexAccountAad(activeAccount.providerId, nextRevision));
+      const selectedModel = activeAccount.model && models.some((model) => model.id === activeAccount.model) ? activeAccount.model : null;
+      const saved = await dependencies.repository.finishAccount(activeAccount.providerId, activeAccount.revision, activeLease.leaseId, {
         state: "connected", credentialCiphertext, catalog: models, catalogCheckedAt: checkedAt, model: selectedModel,
       });
       if (!saved) throw new CodexDirectError("busy");
+      activeLease = null;
       return { models, checkedAt, account: await view() };
     } catch (error) {
-      await releaseAfterFailure(current.providerId, current.revision, lease.leaseId);
+      if (activeLease) await releaseAfterFailure(activeAccount.providerId, activeAccount.revision, activeLease.leaseId);
       if (isCodexDirectError(error)) throw error;
       throw new CodexDirectError("unavailable");
     }
@@ -232,13 +259,16 @@ export function createCodexDirectService(dependencies: CodexDirectServiceDepende
       return refreshModels(expectedRevision, signal);
     },
 
-    async selectModel(model: string, expectedRevision: number): Promise<DirectAccountView> {
+    async selectModel(model: string, expectedRevision: number, signal: AbortSignal): Promise<DirectAccountView> {
       if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(model)) throw new CodexDirectError("invalid_request");
       let account = await dependencies.repository.readAccount();
       if (!account || account.state !== "connected") throw new CodexDirectError("needs_login");
       if (account.revision !== expectedRevision) throw new CodexDirectError("busy");
-      if (!account.catalogCheckedAt || dependencies.clock() - Date.parse(account.catalogCheckedAt) > 5 * 60_000) {
-        throw new CodexDirectError("unsupported_protocol");
+      const catalogAge = account.catalogCheckedAt ? dependencies.clock() - Date.parse(account.catalogCheckedAt) : Number.POSITIVE_INFINITY;
+      if (!Number.isFinite(catalogAge) || catalogAge < 0 || catalogAge > 5 * 60_000) {
+        await refreshModels(account.revision, signal);
+        account = await dependencies.repository.readAccount(account.providerId);
+        if (!account || account.state !== "connected") throw new CodexDirectError("needs_login");
       }
       if (!account.catalog.some((entry) => entry.id === model)) throw new CodexDirectError("invalid_request");
       const lease = await dependencies.repository.claimAccount(account.providerId, account.revision, "models", now());
